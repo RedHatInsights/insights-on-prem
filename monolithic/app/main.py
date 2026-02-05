@@ -95,17 +95,12 @@ async def upload_archive(
     """
     Upload and process Red Hat Insights archive.
 
-    Args:
-        file: Uploaded archive file (tar, tar.gz, or tgz format)
-        x_rh_insights_request_id: Optional request ID header
-        db: Database session
-        upload_service: Upload service instance
-
-    Returns:
-        UploadResponse with processing results
-
-    Raises:
-        HTTPException: On validation or processing errors
+    :param file: Uploaded archive file (tar, tar.gz, or tgz format)
+    :param x_rh_insights_request_id: Optional request ID header
+    :param db: Database session
+    :param upload_service: Upload service instance
+    :return: UploadResponse with processing results
+    :raises HTTPException: On validation or processing errors
     """
     # Generate or use provided request ID
     request_id = x_rh_insights_request_id or str(uuid.uuid4())
@@ -157,17 +152,12 @@ async def get_cluster_report_v2(
     This endpoint returns the latest report for the given cluster ID,
     following the v2 API format used by insights-results-smart-proxy.
 
-    Args:
-        cluster_id: Cluster UUID
-        get_disabled: If true, disabled rules will be included
-        db: Database session
-        report_service: Report service instance
-
-    Returns:
-        ReportResponseV2 with detailed report data
-
-    Raises:
-        HTTPException: On not found or processing errors
+    :param cluster_id: Cluster UUID
+    :param get_disabled: If true, disabled rules will be included
+    :param db: Database session
+    :param report_service: Report service instance
+    :return: ReportResponseV2 with detailed report data
+    :raises HTTPException: On not found or processing errors
     """
     try:
         report_v2 = report_service.get_cluster_report_v2(db, cluster_id, get_disabled)
@@ -195,7 +185,13 @@ async def get_cluster_report_v2(
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc: HTTPException):
-    """Custom handler for HTTP exceptions."""
+    """
+    Custom handler for HTTP exceptions.
+
+    :param request: HTTP request object
+    :param exc: HTTPException instance
+    :return: JSONResponse with error details
+    """
     return JSONResponse(
         status_code=exc.status_code,
         content=ErrorResponse(

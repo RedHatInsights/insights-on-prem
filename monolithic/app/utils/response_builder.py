@@ -19,14 +19,11 @@ class ResponseBuilder:
         """
         Build v2 rule hit detailed response.
 
-        Args:
-            hit: RuleHit model instance
-            content_data: Content data from ContentService
-            insights_details: Details from insights-core report
-            publish_date: Optional publish date string
-
-        Returns:
-            RuleHitDetailedResponse for v2 API
+        :param hit: RuleHit model instance
+        :param content_data: Content data from ContentService
+        :param insights_details: Details from insights-core report
+        :param publish_date: Optional publish date string
+        :return: RuleHitDetailedResponse for v2 API
         """
         # Use publish_date from content as created_at
         if publish_date:

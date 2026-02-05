@@ -19,14 +19,9 @@ def load_insights_config(config_path: str = "config.yml") -> Dict:
     """
     Load insights-core configuration from YAML file.
 
-    Args:
-        config_path: Path to the YAML configuration file
-
-    Returns:
-        Configuration dictionary
-
-    Raises:
-        ProcessingError: If config file cannot be loaded
+    :param config_path: Path to the YAML configuration file
+    :return: Configuration dictionary
+    :raises ProcessingError: If config file cannot be loaded
     """
     try:
         if not os.path.exists(config_path):
@@ -58,8 +53,7 @@ def load_insights_components(config: Dict) -> None:
     """
     Load insights-core components based on configuration.
 
-    Args:
-        config: Configuration dictionary from YAML file
+    :param config: Configuration dictionary from YAML file
     """
     plugins = config.get("plugins", {})
     packages = plugins.get("packages", [])

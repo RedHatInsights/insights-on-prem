@@ -24,9 +24,8 @@ class UploadService:
         """
         Initialize the upload service.
 
-        Args:
-            processor_service: Processor service instance
-            settings: Application settings
+        :param processor_service: Processor service instance
+        :param settings: Application settings
         """
         self.processor_service = processor_service
         self.settings = settings
@@ -35,12 +34,9 @@ class UploadService:
         """
         Validate uploaded file.
 
-        Args:
-            file: Uploaded file
-            request_id: Request ID for logging
-
-        Raises:
-            ValidationError: If validation fails
+        :param file: Uploaded file
+        :param request_id: Request ID for logging
+        :raises ValidationError: If validation fails
         """
         if not file.filename:
             logger.warning(f"Request {request_id}: No filename provided")
@@ -56,15 +52,10 @@ class UploadService:
         """
         Save uploaded file to temporary location.
 
-        Args:
-            file: Uploaded file
-            request_id: Request ID for logging
-
-        Returns:
-            Tuple of (temp_file_path, total_size)
-
-        Raises:
-            ValidationError: If file size exceeds limit
+        :param file: Uploaded file
+        :param request_id: Request ID for logging
+        :return: Tuple of (temp_file_path, total_size)
+        :raises ValidationError: If file size exceeds limit
         """
         # Determine file suffix
         if file.filename.endswith('.tar.gz'):
@@ -121,17 +112,12 @@ class UploadService:
         """
         Main upload processing function.
 
-        Args:
-            db: Database session
-            file: Uploaded file
-            request_id: Request ID
-
-        Returns:
-            UploadResponse with processing results
-
-        Raises:
-            ValidationError: On validation errors
-            ProcessingError: On processing errors
+        :param db: Database session
+        :param file: Uploaded file
+        :param request_id: Request ID
+        :return: UploadResponse with processing results
+        :raises ValidationError: On validation errors
+        :raises ProcessingError: On processing errors
         """
         logger.info(f"Upload request {request_id}")
 

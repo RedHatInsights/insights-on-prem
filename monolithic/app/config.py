@@ -1,4 +1,9 @@
-"""Application configuration management."""
+"""
+Application configuration management.
+
+This module provides configuration settings loaded from environment variables
+using Pydantic settings management.
+"""
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -47,5 +52,9 @@ class Settings(BaseSettings):
 
 @lru_cache()
 def get_settings() -> Settings:
-    """Get cached settings instance."""
+    """
+    Get cached settings instance.
+
+    :return: Cached Settings singleton instance
+    """
     return Settings()

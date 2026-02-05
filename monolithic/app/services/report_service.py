@@ -21,8 +21,7 @@ class ReportService:
         """
         Initialize the report service.
 
-        Args:
-            content_service: Content service instance
+        :param content_service: Content service instance
         """
         self.content_service = content_service
 
@@ -30,16 +29,11 @@ class ReportService:
         """
         Fetch v2 format report for a specific cluster.
 
-        Args:
-            db: Database session
-            cluster_id: Cluster UUID
-            get_disabled: If true, disabled rules will be included
-
-        Returns:
-            ReportV2 object
-
-        Raises:
-            ValueError: If cluster report not found
+        :param db: Database session
+        :param cluster_id: Cluster UUID
+        :param get_disabled: If true, disabled rules will be included
+        :return: ReportV2 object
+        :raises ValueError: If cluster report not found
         """
         logger.info(f"Fetching v2 report for cluster {cluster_id}")
 
@@ -110,12 +104,9 @@ class ReportService:
         """
         Build v2 detailed rule hit responses.
 
-        Args:
-            rule_hits: List of RuleHit model instances
-            insights_map: Map of insights-core reports by component|key
-
-        Returns:
-            List of RuleHitDetailedResponse objects
+        :param rule_hits: List of RuleHit model instances
+        :param insights_map: Map of insights-core reports by component|key
+        :return: List of RuleHitDetailedResponse objects
         """
         rule_hits_detailed = []
 

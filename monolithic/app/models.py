@@ -34,14 +34,11 @@ class Report(Base):
         """
         Insert or update a report atomically using PostgreSQL's ON CONFLICT.
 
-        Args:
-            db: Database session
-            cluster: Cluster identifier
-            report: Report JSON data
-            gathered_at: When the report was gathered
-
-        Returns:
-            The created or updated Report instance
+        :param db: Database session
+        :param cluster: Cluster identifier
+        :param report: Report JSON data
+        :param gathered_at: When the report was gathered
+        :return: The created or updated Report instance
         """
         now = datetime.utcnow()
 
@@ -109,14 +106,11 @@ class RuleHit(Base):
         """
         Insert or update a rule hit atomically using PostgreSQL's ON CONFLICT.
 
-        Args:
-            db: Database session
-            cluster_id: Cluster identifier
-            rule_fqdn: Fully qualified rule name
-            error_key: Error key for the rule
-
-        Returns:
-            The created or updated RuleHit instance
+        :param db: Database session
+        :param cluster_id: Cluster identifier
+        :param rule_fqdn: Fully qualified rule name
+        :param error_key: Error key for the rule
+        :return: The created or updated RuleHit instance
         """
         now = datetime.utcnow()
 
@@ -157,12 +151,9 @@ class RuleHit(Base):
         """
         Delete all rule hits for a cluster.
 
-        Args:
-            db: Database session
-            cluster_id: Cluster identifier
-
-        Returns:
-            Number of rows deleted
+        :param db: Database session
+        :param cluster_id: Cluster identifier
+        :return: Number of rows deleted
         """
         count = (
             db.query(cls).filter_by(cluster_id=cluster_id).delete()
@@ -190,13 +181,10 @@ class ReportInfo(Base):
         """
         Insert or update report info atomically using PostgreSQL's ON CONFLICT.
 
-        Args:
-            db: Database session
-            cluster_id: Cluster identifier
-            version_info: Version information JSON
-
-        Returns:
-            The created or updated ReportInfo instance
+        :param db: Database session
+        :param cluster_id: Cluster identifier
+        :param version_info: Version information JSON
+        :return: The created or updated ReportInfo instance
         """
         # Prepare insert statement with ON CONFLICT DO UPDATE
         stmt = insert(cls).values(

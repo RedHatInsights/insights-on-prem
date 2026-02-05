@@ -17,8 +17,7 @@ def get_engine():
     """
     Get or create the SQLAlchemy engine (singleton).
 
-    Returns:
-        SQLAlchemy Engine instance
+    :return: SQLAlchemy Engine instance
     """
     settings = get_settings()
     return create_engine(
@@ -35,8 +34,7 @@ def get_session_factory():
     """
     Get or create the session factory (singleton).
 
-    Returns:
-        SQLAlchemy sessionmaker instance
+    :return: SQLAlchemy sessionmaker instance
     """
     engine = get_engine()
     return sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -46,8 +44,7 @@ def get_db() -> Generator[Session, None, None]:
     """
     Dependency for FastAPI routes to get database session.
 
-    Yields:
-        Database session that will be closed after use.
+    :return: Database session that will be closed after use
     """
     SessionLocal = get_session_factory()
     db = SessionLocal()

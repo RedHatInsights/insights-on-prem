@@ -32,8 +32,7 @@ class ProcessorService:
         """
         Initialize the processor service.
 
-        Args:
-            config: Insights-core configuration dictionary
+        :param config: Insights-core configuration dictionary
         """
         self.config = config
         self.service_config = self.config.get("service", {})
@@ -72,11 +71,8 @@ class ProcessorService:
         """
         Get dependency graphs for target components.
 
-        Args:
-            target_components: List of component name prefixes
-
-        Returns:
-            Dictionary of component dependency graphs
+        :param target_components: List of component name prefixes
+        :return: Dictionary of component dependency graphs
         """
         graph = {}
         tc = tuple(target_components or [])
@@ -92,11 +88,8 @@ class ProcessorService:
         """
         Validate unpacked archive size.
 
-        Args:
-            extraction_path: Path to extracted archive
-
-        Returns:
-            True if size is acceptable, False otherwise
+        :param extraction_path: Path to extracted archive
+        :return: True if size is acceptable, False otherwise
         """
         if self.unpacked_archive_size_limit < 0:
             logger.debug("No size limitation for unpacked archive")
@@ -116,14 +109,9 @@ class ProcessorService:
         """
         Extract cluster ID from archive.
 
-        Args:
-            extraction_path: Path to extracted archive directory
-
-        Returns:
-            Cluster identifier
-
-        Raises:
-            ProcessingError: If cluster ID cannot be determined
+        :param extraction_path: Path to extracted archive directory
+        :return: Cluster identifier
+        :raises ProcessingError: If cluster ID cannot be determined
         """
         import os
 
@@ -146,14 +134,9 @@ class ProcessorService:
         """
         Process archive with insights-core.
 
-        Args:
-            archive_path: Path to archive file
-
-        Returns:
-            Tuple of (cluster_id, results_json, version_info)
-
-        Raises:
-            ProcessingError: If processing fails
+        :param archive_path: Path to archive file
+        :return: Tuple of (cluster_id, results_json, version_info)
+        :raises ProcessingError: If processing fails
         """
         try:
             logger.info(f"Processing archive: {archive_path}")
@@ -208,11 +191,8 @@ class ProcessorService:
         """
         Extract rule hits from insights-core results.
 
-        Args:
-            results_json: JSON string from insights-core
-
-        Returns:
-            List of rule hit dictionaries
+        :param results_json: JSON string from insights-core
+        :return: List of rule hit dictionaries
         """
         rule_hits = []
 
@@ -251,14 +231,11 @@ class ProcessorService:
         """
         Save processing results to database.
 
-        Args:
-            db: Database session
-            cluster_id: Cluster identifier
-            results_json: JSON results from insights-core
-            version_info: Version information dictionary
-
-        Returns:
-            Number of rule hits saved
+        :param db: Database session
+        :param cluster_id: Cluster identifier
+        :param results_json: JSON results from insights-core
+        :param version_info: Version information dictionary
+        :return: Number of rule hits saved
         """
         # Extract rule hits from results
         rule_hits = self.extract_rule_hits(results_json)
@@ -304,15 +281,10 @@ class ProcessorService:
         """
         Main processing function - extract, analyze, and save archive.
 
-        Args:
-            db: Database session
-            archive_path: Path to uploaded archive file
-
-        Returns:
-            Tuple of (cluster_id, number of rules found)
-
-        Raises:
-            ProcessingError: If processing fails at any stage
+        :param db: Database session
+        :param archive_path: Path to uploaded archive file
+        :return: Tuple of (cluster_id, number of rules found)
+        :raises ProcessingError: If processing fails at any stage
         """
         logger.info(f"Starting archive processing: {archive_path}")
 

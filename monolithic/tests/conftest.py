@@ -10,7 +10,11 @@ from app.main import app
 
 @pytest.fixture(scope="function")
 def test_db():
-    """Create a test database for each test."""
+    """
+    Create a test database for each test.
+
+    :return: SQLAlchemy Session instance for testing
+    """
     # Use in-memory SQLite for testing
     SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
 

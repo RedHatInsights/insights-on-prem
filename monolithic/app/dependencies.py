@@ -19,8 +19,7 @@ def get_content_service() -> ContentService:
     """
     Get or create the content service instance (cached singleton).
 
-    Returns:
-        ContentService singleton instance
+    :return: ContentService singleton instance
     """
     return ContentService()
 
@@ -32,11 +31,8 @@ def get_report_service(
     """
     Get or create the ReportService instance (cached singleton).
 
-    Args:
-        content_service: Content service instance
-
-    Returns:
-        ReportService singleton instance
+    :param content_service: Content service instance
+    :return: ReportService singleton instance
     """
     return ReportService(content_service)
 
@@ -49,11 +45,8 @@ def get_processor_config(config_path: str = "config.yml") -> Dict:
     Loads insights-core configuration and components once at startup.
     The @lru_cache decorator ensures this only runs once.
 
-    Args:
-        config_path: Path to config file
-
-    Returns:
-        Configuration dictionary
+    :param config_path: Path to config file
+    :return: Configuration dictionary
     """
     config = load_insights_config(config_path)
     load_insights_components(config)
@@ -67,11 +60,8 @@ def get_processor_service(
     """
     Get or create the ProcessorService instance (cached singleton).
 
-    Args:
-        config: Processor configuration
-
-    Returns:
-        ProcessorService singleton instance
+    :param config: Processor configuration
+    :return: ProcessorService singleton instance
     """
     return ProcessorService(config)
 
@@ -83,11 +73,8 @@ def get_upload_service(
     """
     Get or create the UploadService instance (cached singleton).
 
-    Args:
-        processor_service: Processor service instance
-
-    Returns:
-        UploadService singleton instance
+    :param processor_service: Processor service instance
+    :return: UploadService singleton instance
     """
     settings = get_settings()
     return UploadService(processor_service, settings)
