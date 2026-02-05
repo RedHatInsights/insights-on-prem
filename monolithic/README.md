@@ -36,10 +36,10 @@ Build and push a multiarch (amd64, arm64) image to Quay (this step is necessary 
 
 ```bash
 # Login to Quay
-podman login quay.io
+docker login quay.io
 
 # Build and push multiarch image
-podman buildx build --platform linux/amd64,linux/arm64,linux/ppc64le,linux/s390x \
+docker buildx build --platform linux/amd64,linux/arm64 \
   -t quay.io/ccxdev/insights-on-prem-poc:latest \
   --push .
 ```
@@ -75,7 +75,7 @@ podman buildx build --platform linux/amd64,linux/arm64,linux/ppc64le,linux/s390x
 
 ### Prerequisites
 - OpenShift cluster with ACM installed
-- MultiClusterHub created in `open-cluster-management` namespace
+- MultiClusterHub created in `open-cluster-management` namespace (it can take several minutes before all components are started)
 - Quay pull secret for `ccxdev/insights-on-prem-poc` repository saved as `deploy/ccxdev-insights-on-prem-poc-secret.yml`
 
 ### Deploy
