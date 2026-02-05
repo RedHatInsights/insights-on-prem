@@ -23,7 +23,7 @@ class YAMLContentParser:
         """
         if content_path is None:
             # Default to rules-content in project root
-            self.content_path = Path(__file__).parent.parent / "rules-content"
+            self.content_path = Path(__file__).parent.parent / "content" 
         else:
             self.content_path = Path(content_path)
 

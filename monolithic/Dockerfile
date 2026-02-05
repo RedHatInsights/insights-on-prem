@@ -1,3 +1,5 @@
+FROM quay.io/redhat-services-prod/obsint-processing-tenant/rules-containers/rules-containers-private:latest AS rules
+
 FROM registry.access.redhat.com/ubi9-minimal:latest
 
 ENV HOME=/app \
@@ -9,12 +11,13 @@ ADD https://certs.corp.redhat.com/certs/2022-IT-Root-CA.pem https://certs.corp.r
 
 WORKDIR $HOME
 
+COPY --from=rules /app/content/content /app/content
+
 ENV PATH="$VENV/bin:$PATH"
 
 # Install dependencies and setup - matching ccx-data-pipeline approach
 # Added: file, tar, unzip - required by insights-core for archive processing
-# Added: git - required to clone ccx-rules-ocp content
-RUN microdnf install --nodocs -y python3.11 python3.11-devel gcc postgresql-devel file tar unzip git && \
+RUN microdnf install --nodocs -y sqlite python3.11 python3.11-devel gcc postgresql-devel file tar unzip && \
     python3.11 -m venv $VENV && \
     update-ca-trust && \
     pip install --no-cache-dir -U pip setuptools wheel && \
@@ -31,10 +34,6 @@ ENV PYTHONDONTWRITEBYTECODE=1
 COPY . $HOME
 
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Clone rules content from ccx-rules-ocp repository
-RUN chmod +x $HOME/update_rules_content.sh && \
-    $HOME/update_rules_content.sh 
 
 # Expose port
 EXPOSE 8000

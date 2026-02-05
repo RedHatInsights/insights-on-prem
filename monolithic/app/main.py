@@ -14,7 +14,7 @@ from app.schemas import (
     ErrorResponse,
     ReportResponseV2,
 )
-from app.dependencies import get_content_service, get_report_service, get_upload_service
+from app.dependencies import registry
 from app.services.report_service import ReportService
 from app.services.upload_service import UploadService
 from app.exceptions import ValidationError, ProcessingError
@@ -54,7 +54,7 @@ async def startup_event():
 
     # Initialize content service (loads YAML/markdown files into memory, like content-service)
     try:
-        content_service = get_content_service()
+        content_service = registry.get_content_service()
         logger.info("Content service initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize content service: {e}", exc_info=True)
@@ -90,7 +90,7 @@ async def upload_archive(
     file: UploadFile = File(...),
     x_rh_insights_request_id: str = Header(None, alias="x-rh-insights-request-id"),
     db: Session = Depends(get_db),
-    upload_service: UploadService = Depends(get_upload_service),
+    upload_service: UploadService = Depends(registry.get_upload_service),
 ):
     """
     Upload and process Red Hat Insights archive.
@@ -144,7 +144,7 @@ async def get_cluster_report_v2(
     cluster_id: str,
     get_disabled: bool = False,
     db: Session = Depends(get_db),
-    report_service: ReportService = Depends(get_report_service),
+    report_service: ReportService = Depends(registry.get_report_service),
 ):
     """
     Retrieve the latest report for a specific cluster (v2 endpoint).
