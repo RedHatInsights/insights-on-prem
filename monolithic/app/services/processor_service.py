@@ -1,0 +1,328 @@
+"""Insights-core archive processing service."""
+import json
+import logging
+from datetime import datetime
+from io import StringIO
+from pathlib import Path
+from typing import Dict, List, Tuple
+
+from sqlalchemy.orm import Session
+
+# Insights-core imports
+from insights import dr
+from insights.core.archives import extract
+from insights.core.hydration import initialize_broker
+from insights.formats.text import HumanReadableFormat
+
+from app.config import get_settings
+from app.models import Report, RuleHit, ReportInfo
+from app.exceptions import ProcessingError
+
+logger = logging.getLogger(__name__)
+settings = get_settings()
+
+
+class ProcessorService:
+    """
+    Service for processing Red Hat Insights archives.
+    Refactored from ArchiveProcessor to use dependency injection.
+    """
+
+    def __init__(self, config: Dict):
+        """
+        Initialize the processor service.
+
+        Args:
+            config: Insights-core configuration dictionary
+        """
+        self.config = config
+        self.service_config = self.config.get("service", {})
+
+        # Setup formatter
+        formatter_name = self.service_config.get("format", "insights.formats._json.JsonFormat")
+        self.Formatter = dr.get_component(formatter_name) or HumanReadableFormat
+
+        # Setup target components
+        target_components = self.service_config.get("target_components", [])
+        if target_components:
+            self.components_dict = self._get_component_graphs(target_components)
+        else:
+            # Use all single-node components if none specified
+            self.components_dict = dr.determine_components(
+                dr.COMPONENTS[dr.GROUPS.single]
+            )
+
+        self.target_components = dr.toposort_flatten(self.components_dict, sort=False)
+
+        # Extraction settings
+        self.extract_timeout = self.service_config.get("extract_timeout", 300)
+        self.extract_tmp_dir = self.service_config.get(
+            "extract_tmp_dir", settings.temp_upload_dir
+        )
+        self.unpacked_archive_size_limit = self.service_config.get(
+            "unpacked_archive_size_limit", -1
+        )
+
+        logger.debug(
+            f"Processor initialized with {len(self.target_components)} components"
+        )
+
+    @staticmethod
+    def _get_component_graphs(target_components: List[str]) -> Dict:
+        """
+        Get dependency graphs for target components.
+
+        Args:
+            target_components: List of component name prefixes
+
+        Returns:
+            Dictionary of component dependency graphs
+        """
+        graph = {}
+        tc = tuple(target_components or [])
+
+        if tc:
+            for c in dr.DELEGATES:
+                if dr.get_name(c).startswith(tc):
+                    graph.update(dr.get_dependency_graph(c))
+
+        return graph
+
+    def validate_size(self, extraction_path: str) -> bool:
+        """
+        Validate unpacked archive size.
+
+        Args:
+            extraction_path: Path to extracted archive
+
+        Returns:
+            True if size is acceptable, False otherwise
+        """
+        if self.unpacked_archive_size_limit < 0:
+            logger.debug("No size limitation for unpacked archive")
+            return True
+
+        total_size = sum(p.stat().st_size for p in Path(extraction_path).rglob("*"))
+
+        if total_size >= self.unpacked_archive_size_limit:
+            logger.warning(
+                f"Unpacked archive exceeds limit: {total_size} >= {self.unpacked_archive_size_limit}"
+            )
+            return False
+
+        return True
+
+    def get_cluster_id(self, extraction_path: str) -> str:
+        """
+        Extract cluster ID from archive.
+
+        Args:
+            extraction_path: Path to extracted archive directory
+
+        Returns:
+            Cluster identifier
+
+        Raises:
+            ProcessingError: If cluster ID cannot be determined
+        """
+        import os
+
+        # Get cluster ID from config/id file
+        id_file_path = os.path.join(extraction_path, "config", "id")
+        if os.path.exists(id_file_path):
+            try:
+                with open(id_file_path, "r") as f:
+                    cluster_id = f.read().strip()
+                    if cluster_id:
+                        logger.info(f"Found cluster_id in config/id: {cluster_id}")
+                        return cluster_id
+            except Exception as e:
+                logger.error(f"Failed to read config/id: {e}")
+                raise ProcessingError(f"Failed to read config/id: {str(e)}")
+
+        raise ProcessingError("Could not find cluster ID. Missing config/id file in archive.")
+
+    def process_with_insights_core(self, archive_path: str) -> Tuple[str, str, Dict]:
+        """
+        Process archive with insights-core.
+
+        Args:
+            archive_path: Path to archive file
+
+        Returns:
+            Tuple of (cluster_id, results_json, version_info)
+
+        Raises:
+            ProcessingError: If processing fails
+        """
+        try:
+            logger.info(f"Processing archive: {archive_path}")
+
+            # Use insights.core.archives.extract()
+            with extract(
+                archive_path,
+                timeout=self.extract_timeout,
+                extract_dir=self.extract_tmp_dir,
+            ) as extraction:
+                # Validate size
+                if not self.validate_size(extraction.tmp_dir):
+                    raise ProcessingError(
+                        f"Archive exceeds size limit: {self.unpacked_archive_size_limit}"
+                    )
+
+                # Get cluster ID
+                cluster_id = self.get_cluster_id(extraction.tmp_dir)
+                logger.info(f"Processing cluster: {cluster_id}")
+
+                # Initialize broker
+                ctx, broker = initialize_broker(extraction.tmp_dir)
+
+                # Run components with formatter
+                output = StringIO()
+                with self.Formatter(broker, stream=output):
+                    dr.run_components(
+                        self.target_components, self.components_dict, broker=broker
+                    )
+
+                output.seek(0)
+                result = output.read()
+
+                logger.info(f"Processing completed for cluster {cluster_id}")
+                logger.debug(f"Result length: {len(result)} chars")
+
+                # Extract version info
+                version_info = {
+                    "insights_core_version": "unknown",
+                    "processed_at": datetime.utcnow().isoformat(),
+                    "formatter": str(self.Formatter),
+                    "components_count": len(self.target_components),
+                }
+
+                return cluster_id, result, version_info
+
+        except Exception as e:
+            logger.error(f"insights-core processing failed: {e}", exc_info=True)
+            raise ProcessingError(f"Analysis failed: {str(e)}")
+
+    def extract_rule_hits(self, results_json: str) -> List[Dict]:
+        """
+        Extract rule hits from insights-core results.
+
+        Args:
+            results_json: JSON string from insights-core
+
+        Returns:
+            List of rule hit dictionaries
+        """
+        rule_hits = []
+
+        try:
+            if not results_json or results_json == "{}":
+                logger.info("No results to parse")
+                return rule_hits
+
+            results = json.loads(results_json)
+            reports = results.get("reports", [])
+
+            for report in reports:
+                if report.get("type") == "rule":
+                    component = report.get("component", "")
+                    rule_fqdn = component
+                    error_key = report.get("key", "UNKNOWN_ERROR")
+                    details = report.get("details", {})
+
+                    if rule_fqdn:
+                        rule_hits.append({
+                            "rule_fqdn": rule_fqdn,
+                            "error_key": error_key,
+                            "details": details,
+                        })
+
+            logger.info(f"Extracted {len(rule_hits)} rule hits")
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse results JSON: {e}")
+        except Exception as e:
+            logger.error(f"Error extracting rule hits: {e}", exc_info=True)
+
+        return rule_hits
+
+    def save_results(self, db: Session, cluster_id: str, results_json: str, version_info: Dict) -> int:
+        """
+        Save processing results to database.
+
+        Args:
+            db: Database session
+            cluster_id: Cluster identifier
+            results_json: JSON results from insights-core
+            version_info: Version information dictionary
+
+        Returns:
+            Number of rule hits saved
+        """
+        # Extract rule hits from results
+        rule_hits = self.extract_rule_hits(results_json)
+
+        # Save main report
+        report_data = {
+            "cluster_id": cluster_id,
+            "rule_count": len(rule_hits),
+            "processed_at": datetime.utcnow().isoformat(),
+            "results": results_json,
+        }
+
+        Report.upsert(
+            db,
+            cluster=cluster_id,
+            report=json.dumps(report_data),
+            gathered_at=datetime.utcnow(),
+        )
+
+        # Clear existing rule hits for this cluster
+        RuleHit.delete_for_cluster(db, cluster_id)
+
+        # Save new rule hits
+        for hit in rule_hits:
+            RuleHit.upsert(
+                db,
+                cluster_id=cluster_id,
+                rule_fqdn=hit["rule_fqdn"],
+                error_key=hit["error_key"],
+            )
+
+        # Save report info
+        ReportInfo.upsert(
+            db,
+            cluster_id=cluster_id,
+            version_info=json.dumps(version_info),
+        )
+
+        logger.info(f"Saved {len(rule_hits)} rule hits for cluster {cluster_id}")
+        return len(rule_hits)
+
+    def process_archive(self, db: Session, archive_path: str) -> Tuple[str, int]:
+        """
+        Main processing function - extract, analyze, and save archive.
+
+        Args:
+            db: Database session
+            archive_path: Path to uploaded archive file
+
+        Returns:
+            Tuple of (cluster_id, number of rules found)
+
+        Raises:
+            ProcessingError: If processing fails at any stage
+        """
+        logger.info(f"Starting archive processing: {archive_path}")
+
+        # Process with insights-core
+        cluster_id, results_json, version_info = self.process_with_insights_core(
+            archive_path
+        )
+
+        # Save to database
+        rules_count = self.save_results(db, cluster_id, results_json, version_info)
+
+        logger.info(f"Completed processing for cluster {cluster_id}")
+        return cluster_id, rules_count

@@ -1,0 +1,61 @@
+# Insights On-Premise Configuration
+
+plugins:
+  # Packages to load - only specify rule packages
+  # Base insights-core packages (parsers, specs, combiners) are loaded automatically
+  packages:
+    - ccx_rules_ocp.external
+    - ccx_rules_processing
+
+  # Component configurations - uses apply_configs()
+  configs:
+    - name: ccx_ocp_core.config.telemeter.TelemeterServiceConfig
+      enabled: false
+
+service:
+  # Extract timeout in seconds
+  extract_timeout: 300
+
+  # Temporary extraction directory
+  extract_tmp_dir: /tmp/insights-uploads
+
+  # Output format (use dr.get_component() to resolve)
+  # Options:
+  #   - insights.formats.text.HumanReadableFormat
+  #   - insights.formats._json.JsonFormat
+  #   - ccx_ocp_core.core.formats.json.OCPRecommendationsJsonFormat (requires ccx-ocp-core)
+  format: ccx_ocp_core.core.formats.json.OCPRecommendationsJsonFormat
+
+  # Target components to run (empty list means run all single-node components)
+  # Uses dr.COMPONENTS[dr.GROUPS.single] if empty
+  target_components: []
+
+  # Maximum unpacked archive size (-1 for unlimited)
+  unpacked_archive_size_limit: -1
+
+# Logging configuration
+logging:
+  version: 1
+  disable_existing_loggers: false
+  handlers:
+    default:
+      level: DEBUG
+      class: logging.StreamHandler
+      stream: ext://sys.stdout
+      formatter: brief
+  formatters:
+    brief:
+      format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    json:
+      format: "%(filename)s %(lineno)d %(process)d %(levelname)s %(asctime)s %(name)s %(message)s"
+  root:
+    level: INFO
+    handlers:
+      - default
+  loggers:
+    insights:
+      level: WARNING
+    insights.core.dr:
+      level: ERROR
+    app:
+      level: DEBUG
