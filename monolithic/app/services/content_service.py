@@ -131,19 +131,3 @@ class ContentService:
             4: "Critical Impact",
         }
         return impact_map.get(impact, "Medium Impact")
-
-
-# Global content service instance (initialized once)
-_content_service: Optional[ContentService] = None
-
-
-def get_content_service() -> ContentService:
-    """
-    Get or create the global content service instance.
-
-    :return: ContentService instance
-    """
-    global _content_service
-    if _content_service is None:
-        _content_service = ContentService()
-    return _content_service
