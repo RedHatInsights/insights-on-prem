@@ -12,8 +12,6 @@ from app.exceptions import ProcessingError
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-Loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
-
 
 def load_insights_config(config_path: str = "config.yml") -> Dict:
     """
@@ -39,7 +37,7 @@ def load_insights_config(config_path: str = "config.yml") -> Dict:
             }
 
         with open(config_path, "r") as f:
-            config = yaml.load(f, Loader=Loader)
+            config = yaml.safe_load(f)
 
         logger.info(f"Loaded insights-core configuration from {config_path}")
         return config
