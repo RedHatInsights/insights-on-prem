@@ -1,0 +1,1306 @@
+# ConfigMap for ccx-data-pipeline
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ccx-data-pipeline-config
+  namespace: edp-processing
+data:
+  config.yaml: |
+    plugins:
+      packages:
+        - ccx_rules_ocp.external
+        - ccx_rules_processing
+      configs:
+        - name: ccx_ocp_core.config.telemeter.TelemeterServiceConfig
+          enabled: false
+    service:
+      extract_timeout:
+      extract_tmp_dir:
+      format: ccx_ocp_core.core.formats.json.OCPRecommendationsJsonFormat
+      target_components: []
+      consumer:
+        name: ccx_messaging.consumers.kafka_consumer.KafkaConsumer
+        kwargs:
+          incoming_topic: ${CDP_INCOMING_TOPIC:platform.upload.announce}
+          group.id: ${CDP_GROUP_ID:ccx_data_pipeline_app}
+          bootstrap.servers: ${CDP_CONSUMER_SERVER}
+          platform_service: openshift
+          security.protocol: ${CDP_SECURITY_PROTOCOL}
+          sasl.mechanisms: PLAIN
+          sasl.username: ${CDP_CONSUMER_USERNAME}
+          sasl.password: ${CDP_CONSUMER_USERPASS}
+          max.poll.interval.ms: 600000
+          heartbeat.interval.ms: 10000
+          session.timeout.ms: 20000
+          dead_letter_queue_topic: ${CDP_DEAD_LETTER_QUEUE_TOPIC:dead.letter.queue}
+      downloader:
+        name: ccx_messaging.downloaders.http_downloader.HTTPDownloader
+        kwargs:
+          max_archive_size: 100MiB
+          allow_unsafe_links: true
+      engine:
+        name: ccx_messaging.engines.ocp_engine.OCPEngine
+      publisher:
+        name: ccx_messaging.publishers.rule_processing_publisher.RuleProcessingPublisher
+        kwargs:
+          outgoing_topic: ${CDP_OUTGOING_TOPIC:ccx.ocp.results}
+          bootstrap.servers: ${CDP_PUBLISHER_SERVER}
+          security.protocol: ${CDP_SECURITY_PROTOCOL}
+          sasl.mechanisms: PLAIN
+          sasl.username: ${CDP_PUBLISHER_USERNAME}
+          sasl.password: ${CDP_PUBLISHER_USERPASS}
+      watchers:
+        - name: ccx_messaging.watchers.stats_watcher.StatsWatcher
+          kwargs:
+            prometheus_port: 8000
+        - name: ccx_messaging.watchers.cluster_id_watcher.ClusterIdWatcher
+      logging:
+        version: 1
+        disable_existing_loggers: false
+        handlers:
+          default:
+            level: ${LOGLEVEL_STDOUT:-INFO}
+            class: logging.StreamHandler
+            stream: ext://sys.stdout
+            formatter: json
+        formatters:
+          brief:
+            format: "%(message)s"
+          json:
+            (): "pythonjsonlogger.jsonlogger.JsonFormatter"
+            format: "%(filename)s %(lineno)d %(process)d %(levelname)s %(asctime)s %(name)s %(message)s"
+        root:
+          level: ${LOGLEVEL_ROOT:-WARNING}
+          handlers:
+            - default
+        loggers:
+          insights_messaging:
+            level: ${LOGLEVEL_INSIGHTS_MESSAGING:-INFO}
+          insights:
+            level: ${LOGLEVEL_INSIGHTS:-WARNING}
+          ccx_data_pipeline:
+            level: ${LOGLEVEL_CCX_DATA_PIPELINE:-INFO}
+          ccx_messaging:
+            level: ${LOGLEVEL_CCX_MESSAGING:-INFO}
+
+---
+# ConfigMap for dvo-extractor
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dvo-extractor-config
+  namespace: edp-processing
+data:
+  config.yaml: |
+    plugins:
+      packages:
+        - ccx_rules_ocp.external.dvo
+    service:
+      extract_timeout:
+      extract_tmp_dir:
+      format: ccx_ocp_core.core.formats.json.OCPRecommendationsJsonFormat
+      target_components: []
+      consumer:
+        name: ccx_messaging.consumers.kafka_consumer.KafkaConsumer
+        kwargs:
+          incoming_topic: ${CDP_INCOMING_TOPIC}
+          platform_service: ${CDP_PLATFORM_SERVICE}
+          group.id: ${CDP_GROUP_ID}
+          bootstrap.servers: ${CDP_CONSUMER_SERVER}
+          platform_service: openshift
+          processing_timeout_s: 0
+          max.poll.interval.ms: 600000
+          heartbeat.interval.ms: 10000
+          session.timeout.ms: 20000
+          dead_letter_queue_topic: ${CDP_DEAD_LETTER_QUEUE_TOPIC}
+      downloader:
+        name: ccx_messaging.downloaders.http_downloader.HTTPDownloader
+        kwargs:
+          max_archive_size: 100MiB
+          allow_unsafe_links: ${ALLOW_UNSAFE_LINKS}
+      engine:
+        name: ccx_messaging.engines.ocp_engine.OCPEngine
+      publisher:
+        name: ccx_messaging.publishers.dvo_metrics_publisher.DVOMetricsPublisher
+        kwargs:
+          outgoing_topic: ${CDP_OUTGOING_TOPIC}
+          bootstrap.servers: ${CDP_PUBLISHER_SERVER}
+          compression: gzip
+      watchers:
+        - name: ccx_messaging.watchers.stats_watcher.StatsWatcher
+        - name: ccx_messaging.watchers.cluster_id_watcher.ClusterIdWatcher
+        - name: ccx_messaging.watchers.payload_tracker_watcher.PayloadTrackerWatcher
+          kwargs:
+            bootstrap.servers: ${CDP_CONSUMER_SERVER}
+            topic: ${PAYLOAD_TRACKER_TOPIC}
+            service_name: dvo-extractor
+      logging:
+        version: 1
+        disable_existing_loggers: false
+        handlers:
+          default:
+            level: ${LOGLEVEL_STDOUT:-INFO}
+            class: logging.StreamHandler
+            stream: ext://sys.stdout
+            formatter: json
+        formatters:
+          brief:
+            format: "%(message)s"
+          json:
+            (): "pythonjsonlogger.jsonlogger.JsonFormatter"
+            format: "%(filename)s %(lineno)d %(process)d %(levelname)s %(asctime)s %(name)s %(message)s"
+        root:
+          level: ${LOGLEVEL_ROOT:-WARNING}
+          handlers:
+            - default
+        loggers:
+          insights_messaging:
+            level: ${LOGLEVEL_INSIGHTS_MESSAGING:-INFO}
+          ccx_messaging:
+            level: ${LOGLEVEL_CCX_MESSAGING:-INFO}
+          insights:
+            level: ${LOGLEVEL_INSIGHTS:-WARNING}
+          dvo_extractor:
+            level: ${LOGLEVEL_DVO_EXTRACTOR:-INFO}
+
+---
+# Deployment: ccx-data-pipeline
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ccx-data-pipeline
+  namespace: edp-processing
+  labels:
+    app: ccx-data-pipeline
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ccx-data-pipeline
+  template:
+    metadata:
+      labels:
+        app: ccx-data-pipeline
+    spec:
+      containers:
+        - name: ccx-data-pipeline
+          image: quay.io/redhat-services-prod/obsint-processing-tenant/data-pipeline/data-pipeline:latest
+          env:
+            - name: CDP_PUBLISHER_SERVER
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-credentials
+                  key: bootstrap-servers
+            - name: CDP_CONSUMER_SERVER
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-credentials
+                  key: bootstrap-servers
+            - name: CDP_CONSUMER_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-credentials
+                  key: sasl-username
+            - name: CDP_CONSUMER_USERPASS
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-credentials
+                  key: sasl-password
+            - name: CDP_PUBLISHER_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-credentials
+                  key: sasl-username
+            - name: CDP_PUBLISHER_USERPASS
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-credentials
+                  key: sasl-password
+            - name: CDP_SECURITY_PROTOCOL
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-credentials
+                  key: security-protocol
+            - name: CDP_INCOMING_TOPIC
+              value: "platform.upload.announce"
+            - name: CDP_OUTGOING_TOPIC
+              value: "ccx.ocp.results"
+            - name: CDP_GROUP_ID
+              value: "ccx_data_pipeline"
+            - name: LOGLEVEL_STDOUT
+              value: "INFO"
+            - name: LOGLEVEL_ROOT
+              value: "WARNING"
+            - name: LOGLEVEL_CCX_DATA_PIPELINE
+              value: "INFO"
+            - name: LOGLEVEL_CCX_MESSAGING
+              value: "INFO"
+            - name: LOGLEVEL_INSIGHTS_MESSAGING
+              value: "INFO"
+            - name: LOGLEVEL_INSIGHTS
+              value: "WARNING"
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: access-key
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: secret-key
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: access-key
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: secret-key
+            - name: S3_ENDPOINT_URL
+              value: "http://minio:9000"
+            - name: S3_USE_PATH_STYLE
+              value: "true"
+            - name: CDP_S3_ENDPOINT_URL
+              value: "http://minio:9000"
+            - name: CDP_USE_PATH_STYLE
+              value: "true"
+          volumeMounts:
+            - name: config
+              mountPath: /config.yaml
+              subPath: config.yaml
+          command: ["ccx-messaging", "/config.yaml"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: config
+          configMap:
+            name: ccx-data-pipeline-config
+
+---
+# Deployment: dvo-extractor
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dvo-extractor
+  namespace: edp-processing
+  labels:
+    app: dvo-extractor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dvo-extractor
+  template:
+    metadata:
+      labels:
+        app: dvo-extractor
+    spec:
+      containers:
+        - name: dvo-extractor
+          image: quay.io/redhat-services-prod/obsint-processing-tenant/data-pipeline/data-pipeline:latest
+          env:
+            - name: CDP_PUBLISHER_SERVER
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-credentials
+                  key: bootstrap-servers
+            - name: CDP_CONSUMER_SERVER
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-credentials
+                  key: bootstrap-servers
+            - name: CDP_GROUP_ID
+              value: "dvo_extractor"
+            - name: CDP_INCOMING_TOPIC
+              value: "platform.upload.announce"
+            - name: CDP_OUTGOING_TOPIC
+              value: "dvo.results"
+            - name: CDP_SECURITY_PROTOCOL
+              value: "PLAINTEXT"
+            - name: PAYLOAD_TRACKER_TOPIC
+              value: "platform.payload-status"
+            - name: LOGLEVEL_STDOUT
+              value: "INFO"
+            - name: LOGLEVEL_ROOT
+              value: "WARNING"
+            - name: LOGLEVEL_DVO_EXTRACTOR
+              value: "INFO"
+            - name: LOGLEVEL_CCX_MESSAGING
+              value: "INFO"
+            - name: LOGLEVEL_INSIGHTS_MESSAGING
+              value: "INFO"
+            - name: LOGLEVEL_INSIGHTS
+              value: "WARNING"
+          volumeMounts:
+            - name: config
+              mountPath: /ccx-data-pipeline/config.yaml
+              subPath: config.yaml
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: config
+          configMap:
+            name: dvo-extractor-config
+
+---
+# Deployment: db-writer
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: db-writer
+  namespace: edp-processing
+  labels:
+    app: db-writer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: db-writer
+  template:
+    metadata:
+      labels:
+        app: db-writer
+    spec:
+      initContainers:
+        - name: migration
+          image: quay.io/redhat-services-prod/obsint-processing-tenant/aggregator/aggregator:latest
+          command: ["/insights-results-aggregator", "migration", "latest"]
+          env:
+            - name: INSIGHTS_RESULTS_AGGREGATOR__STORAGE_BACKEND__USE
+              value: "ocp_recommendations"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__TYPE
+              value: "sql"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__DB_DRIVER
+              value: "postgres"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: username
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: password
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: host
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: port
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: database
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_PARAMS
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: pg-params
+      containers:
+        - name: db-writer
+          image: quay.io/redhat-services-prod/obsint-processing-tenant/aggregator/aggregator:latest
+          env:
+            - name: INSIGHTS_RESULTS_AGGREGATOR__STORAGE_BACKEND__USE
+              value: "ocp_recommendations"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__TYPE
+              value: "sql"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__DB_DRIVER
+              value: "postgres"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: username
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: password
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: host
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: port
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: database
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_PARAMS
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: pg-params
+            - name: INSIGHTS_RESULTS_AGGREGATOR__LOGGING__LOG_LEVEL
+              value: "info"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__LOGGING__DEBUG
+              value: "false"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__SERVER__API_SPEC_FILE
+              value: "/openapi/openapi.json"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__SERVER__ADDRESS
+              value: ":8085"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__BROKER__ADDRESSES
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-credentials
+                  key: bootstrap-servers
+            - name: INSIGHTS_RESULTS_AGGREGATOR__BROKER__TOPIC
+              value: "ccx.ocp.results"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__BROKER__SERVICE_NAME
+              value: "insights-results-db-writer"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__BROKER__GROUP
+              value: "test-consumer-group"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__BROKER__ENABLED
+              value: "true"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__BROKER__ENABLE_ORG_WHITELIST
+              value: "false"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__BROKER__TIMEOUT
+              value: "300s"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+---
+# Deployment: dvo-writer
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dvo-writer
+  namespace: edp-processing
+  labels:
+    app: dvo-writer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dvo-writer
+  template:
+    metadata:
+      labels:
+        app: dvo-writer
+    spec:
+      initContainers:
+        - name: migration
+          image: quay.io/redhat-services-prod/obsint-processing-tenant/aggregator/aggregator:latest
+          command: ["/insights-results-aggregator", "migration", "latest"]
+          env:
+            - name: INSIGHTS_RESULTS_AGGREGATOR__STORAGE_BACKEND__USE
+              value: "dvo_recommendations"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__DVO_RECOMMENDATIONS_STORAGE__TYPE
+              value: "sql"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__DVO_RECOMMENDATIONS_STORAGE__DB_DRIVER
+              value: "postgres"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__DVO_RECOMMENDATIONS_STORAGE__PG_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: username
+            - name: INSIGHTS_RESULTS_AGGREGATOR__DVO_RECOMMENDATIONS_STORAGE__PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: password
+            - name: INSIGHTS_RESULTS_AGGREGATOR__DVO_RECOMMENDATIONS_STORAGE__PG_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: host
+            - name: INSIGHTS_RESULTS_AGGREGATOR__DVO_RECOMMENDATIONS_STORAGE__PG_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: port
+            - name: INSIGHTS_RESULTS_AGGREGATOR__DVO_RECOMMENDATIONS_STORAGE__PG_DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: database
+            - name: INSIGHTS_RESULTS_AGGREGATOR__DVO_RECOMMENDATIONS_STORAGE__PG_PARAMS
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: pg-params
+      containers:
+        - name: dvo-writer
+          image: quay.io/redhat-services-prod/obsint-processing-tenant/aggregator/aggregator:latest
+          env:
+            - name: INSIGHTS_RESULTS_AGGREGATOR__STORAGE_BACKEND__USE
+              value: "dvo_recommendations"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__DVO_RECOMMENDATIONS_STORAGE__DB_DRIVER
+              value: "postgres"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__DVO_RECOMMENDATIONS_STORAGE__PG_PARAMS
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: pg-params
+            - name: INSIGHTS_RESULTS_AGGREGATOR__DVO_RECOMMENDATIONS_STORAGE__LOG_SQL_QUERIES
+              value: "true"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__DVO_RECOMMENDATIONS_STORAGE__TYPE
+              value: "sql"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__DVO_RECOMMENDATIONS_STORAGE__PG_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: username
+            - name: INSIGHTS_RESULTS_AGGREGATOR__DVO_RECOMMENDATIONS_STORAGE__PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: password
+            - name: INSIGHTS_RESULTS_AGGREGATOR__DVO_RECOMMENDATIONS_STORAGE__PG_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: host
+            - name: INSIGHTS_RESULTS_AGGREGATOR__DVO_RECOMMENDATIONS_STORAGE__PG_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: port
+            - name: INSIGHTS_RESULTS_AGGREGATOR__DVO_RECOMMENDATIONS_STORAGE__PG_DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: database
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__TYPE
+              value: "sql"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__DB_DRIVER
+              value: "postgres"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_PARAMS
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: pg-params
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: username
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: password
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: host
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: port
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: database
+            - name: INSIGHTS_RESULTS_AGGREGATOR__LOGGING__LOG_LEVEL
+              value: "info"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__LOGGING__DEBUG
+              value: "false"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__SERVER__API_SPEC_FILE
+              value: "/openapi/openapi.json"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__SERVER__ADDRESS
+              value: ":8085"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__BROKER__ADDRESSES
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-credentials
+                  key: bootstrap-servers
+            - name: INSIGHTS_RESULTS_AGGREGATOR__BROKER__TOPIC
+              value: "dvo.results"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__BROKER__SERVICE_NAME
+              value: "dvo-writer"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__BROKER__GROUP
+              value: "dvo_writer_app"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__BROKER__ENABLED
+              value: "true"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__BROKER__ENABLE_ORG_WHITELIST
+              value: "false"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__BROKER__TIMEOUT
+              value: "300s"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+---
+# Deployment: cache-writer
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cache-writer
+  namespace: edp-processing
+  labels:
+    app: cache-writer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cache-writer
+  template:
+    metadata:
+      labels:
+        app: cache-writer
+    spec:
+      containers:
+        - name: cache-writer
+          image: quay.io/redhat-services-prod/obsint-processing-tenant/aggregator/aggregator:latest
+          env:
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__TYPE
+              value: "redis"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__STORAGE_BACKEND__USE
+              value: "ocp_recommendations"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__REDIS__DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: redis-credentials
+                  key: database
+            - name: INSIGHTS_RESULTS_AGGREGATOR__REDIS__ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: redis-credentials
+                  key: endpoint
+            - name: INSIGHTS_RESULTS_AGGREGATOR__REDIS__PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-credentials
+                  key: password
+            - name: INSIGHTS_RESULTS_AGGREGATOR__REDIS__TIMEOUT_SECONDS
+              value: "30"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__SERVER__API_SPEC_FILE
+              value: "/openapi/openapi.json"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__SERVER__ADDRESS
+              value: ":8086"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__BROKER__ADDRESSES
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-credentials
+                  key: bootstrap-servers
+            - name: INSIGHTS_RESULTS_AGGREGATOR__BROKER__SERVICE_NAME
+              value: "insights-results-cache-writer"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__BROKER__TOPIC
+              value: "ccx.ocp.results"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__BROKER__GROUP
+              value: "test-cache-consumer-group"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__BROKER__ENABLED
+              value: "true"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__BROKER__TIMEOUT
+              value: "300s"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__LOGGING__LOG_LEVEL
+              value: "info"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__LOGGING__DEBUG
+              value: "false"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+---
+# Deployment: aggregator
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aggregator
+  namespace: edp-processing
+  labels:
+    app: aggregator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aggregator
+  template:
+    metadata:
+      labels:
+        app: aggregator
+    spec:
+      containers:
+        - name: aggregator
+          image: quay.io/redhat-services-prod/obsint-processing-tenant/aggregator/aggregator:latest
+          env:
+            - name: INSIGHTS_RESULTS_AGGREGATOR__STORAGE_BACKEND__USE
+              value: "ocp_recommendations"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__TYPE
+              value: "sql"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__DB_DRIVER
+              value: "postgres"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_PARAMS
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: pg-params
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: username
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: password
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: host
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: port
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: database
+            - name: INSIGHTS_RESULTS_AGGREGATOR__LOGGING__LOG_LEVEL
+              value: "info"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__LOGGING__DEBUG
+              value: "false"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__SERVER__API_PREFIX
+              value: "/api/v1/"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__SERVER__API_SPEC_FILE
+              value: "/openapi/openapi.json"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__SERVER__ADDRESS
+              value: ":8082"
+          ports:
+            - containerPort: 8082
+              name: http
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+---
+# Service: aggregator
+apiVersion: v1
+kind: Service
+metadata:
+  name: aggregator
+  namespace: edp-processing
+  labels:
+    app: aggregator
+spec:
+  type: ClusterIP
+  selector:
+    app: aggregator
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8082
+      targetPort: 8082
+
+---
+# Deployment: content-service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: content-service
+  namespace: edp-processing
+  labels:
+    app: content-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: content-service
+  template:
+    metadata:
+      labels:
+        app: content-service
+    spec:
+      containers:
+        - name: content-service
+          image: quay.io/redhat-services-prod/obsint-processing-tenant/content-service/content-service:latest
+          env:
+            - name: INSIGHTS_CONTENT_SERVICE__SERVER__ADDRESS
+              value: ":8081"
+            - name: INSIGHTS_CONTENT_SERVICE__SERVER__API_PREFIX
+              value: "/api/v1/"
+            - name: INSIGHTS_CONTENT_SERVICE__SERVER__API_SPEC_FILE
+              value: "/openapi/openapi.json"
+            - name: INSIGHTS_CONTENT_SERVICE__GROUPS__PATH
+              value: "/groups/groups_config.yaml"
+          ports:
+            - containerPort: 8081
+              name: http
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+
+---
+# Service: content-service
+apiVersion: v1
+kind: Service
+metadata:
+  name: content-service
+  namespace: edp-processing
+  labels:
+    app: content-service
+spec:
+  type: ClusterIP
+  selector:
+    app: content-service
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8081
+      targetPort: 8081
+
+---
+# Deployment: smart-proxy
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smart-proxy
+  namespace: edp-processing
+  labels:
+    app: smart-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: smart-proxy
+  template:
+    metadata:
+      labels:
+        app: smart-proxy
+    spec:
+      containers:
+        - name: smart-proxy
+          image: quay.io/redhat-services-prod/obsint-processing-tenant/smart-proxy/smart-proxy:latest
+          env:
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVER__ADDRESS
+              value: ":8080"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVER__API_DBG_PREFIX
+              value: "/api/dbg/"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVER__API_V1_PREFIX
+              value: "/api/v1/"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVER__API_V2_PREFIX
+              value: "/api/v2/"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVER__API_V1_SPEC_FILE
+              value: "/openapi/v1/openapi.json"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVER__API_V2_SPEC_FILE
+              value: "/openapi/v2/openapi.json"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVICES__GROUPS_POLL_TIME
+              value: "60s"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVICES__CONTENT
+              value: "http://content-service:8081/api/v1/"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVICES__AGGREGATOR
+              value: "http://aggregator:8082/api/v1/"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVICES__UPGRADE_RISKS_PREDICTION
+              value: "http://ccx-upgrades-data-eng:8000/"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__REDIS__ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: redis-credentials
+                  key: endpoint
+            - name: INSIGHTS_RESULTS_SMART_PROXY__REDIS__DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: redis-credentials
+                  key: database
+            - name: INSIGHTS_RESULTS_SMART_PROXY__REDIS__PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-credentials
+                  key: password
+            - name: INSIGHTS_RESULTS_SMART_PROXY__REDIS__TIMEOUT_SECONDS
+              value: "30"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVER__DEBUG
+              value: "false"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVER__AUTH
+              value: "true"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVER__AUTH_TYPE
+              value: "xrh"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVER__USE_HTTPS
+              value: "false"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVER__ORG_CLUSTERS_FALLBACK
+              value: "true"
+          ports:
+            - containerPort: 8080
+              name: http
+          command: ["/insights-results-smart-proxy"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+---
+# Service: smart-proxy
+apiVersion: v1
+kind: Service
+metadata:
+  name: smart-proxy
+  namespace: edp-processing
+  labels:
+    app: smart-proxy
+spec:
+  type: ClusterIP
+  selector:
+    app: smart-proxy
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8080
+      targetPort: 8080
+
+---
+# Deployment: ccx-upgrades-data-eng
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ccx-upgrades-data-eng
+  namespace: edp-processing
+  labels:
+    app: ccx-upgrades-data-eng
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ccx-upgrades-data-eng
+  template:
+    metadata:
+      labels:
+        app: ccx-upgrades-data-eng
+    spec:
+      containers:
+        - name: ccx-upgrades-data-eng
+          image: quay.io/redhat-services-prod/obsint-processing-tenant/upgrades-data-eng/upgrades-data-eng:latest
+          env:
+            - name: INFERENCE_URL
+              value: "http://ccx-upgrades-inference:8000"
+            - name: CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: upgrades-credentials
+                  key: oauth-client-id
+            - name: CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: upgrades-credentials
+                  key: oauth-client-secret
+            - name: SSO_ISSUER
+              valueFrom:
+                secretKeyRef:
+                  name: upgrades-credentials
+                  key: oauth-issuer
+            - name: RHOBS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: upgrades-credentials
+                  key: rhobs-url
+            - name: ALLOW_INSECURE
+              value: "0"
+            - name: OAUTHLIB_INSECURE_TRANSPORT
+              value: "0"
+            - name: CACHE_ENABLED
+              value: "1"
+            - name: CACHE_TTL
+              value: "3600"
+            - name: LOG_LEVEL
+              value: "INFO"
+          ports:
+            - containerPort: 8000
+              name: http
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+---
+# Service: ccx-upgrades-data-eng
+apiVersion: v1
+kind: Service
+metadata:
+  name: ccx-upgrades-data-eng
+  namespace: edp-processing
+  labels:
+    app: ccx-upgrades-data-eng
+spec:
+  type: ClusterIP
+  selector:
+    app: ccx-upgrades-data-eng
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8000
+      targetPort: 8000
+
+---
+# Deployment: ccx-upgrades-inference
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ccx-upgrades-inference
+  namespace: edp-processing
+  labels:
+    app: ccx-upgrades-inference
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ccx-upgrades-inference
+  template:
+    metadata:
+      labels:
+        app: ccx-upgrades-inference
+    spec:
+      containers:
+        - name: ccx-upgrades-inference
+          image: quay.io/redhat-services-prod/obsint-processing-tenant/upgrades-inference/upgrades-inference:latest
+          ports:
+            - containerPort: 8000
+              name: http
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+
+---
+# Service: ccx-upgrades-inference
+apiVersion: v1
+kind: Service
+metadata:
+  name: ccx-upgrades-inference
+  namespace: edp-processing
+  labels:
+    app: ccx-upgrades-inference
+spec:
+  type: ClusterIP
+  selector:
+    app: ccx-upgrades-inference
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8000
+      targetPort: 8000
+
+---
+# Deployment: notification-writer
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-writer
+  namespace: edp-processing
+  labels:
+    app: notification-writer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: notification-writer
+  template:
+    metadata:
+      labels:
+        app: notification-writer
+    spec:
+      containers:
+        - name: notification-writer
+          image: quay.io/redhat-services-prod/obsint-processing-tenant/notification-writer/notification-writer:latest
+          env:
+            - name: CCX_NOTIFICATION_WRITER__BROKER__ADDRESSES
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-credentials
+                  key: bootstrap-servers
+            - name: CCX_NOTIFICATION_WRITER__BROKER__TOPIC
+              value: "ccx.ocp.results"
+            - name: CCX_NOTIFICATION_WRITER__BROKER__GROUP
+              value: "notification-writer"
+            - name: CCX_NOTIFICATION_WRITER__BROKER__ENABLED
+              value: "true"
+            - name: CCX_NOTIFICATION_WRITER__STORAGE__DB_DRIVER
+              value: "postgres"
+            - name: CCX_NOTIFICATION_WRITER__STORAGE__PG_PARAMS
+              valueFrom:
+                secretKeyRef:
+                  name: notification-db-credentials
+                  key: pg-params
+                  optional: true
+            - name: CCX_NOTIFICATION_WRITER__STORAGE__PG_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: notification-db-credentials
+                  key: username
+            - name: CCX_NOTIFICATION_WRITER__STORAGE__PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: notification-db-credentials
+                  key: password
+            - name: CCX_NOTIFICATION_WRITER__STORAGE__PG_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: notification-db-credentials
+                  key: host
+            - name: CCX_NOTIFICATION_WRITER__STORAGE__PG_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: notification-db-credentials
+                  key: port
+            - name: CCX_NOTIFICATION_WRITER__STORAGE__PG_DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: notification-db-credentials
+                  key: database
+            - name: CCX_NOTIFICATION_WRITER__LOGGING__DEBUG
+              value: "false"
+            - name: CCX_NOTIFICATION_WRITER__LOGGING__LOG_LEVEL
+              value: "info"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+---
+# Deployment: ingress
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingress
+  namespace: edp-processing
+  labels:
+    app: ingress
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ingress
+  template:
+    metadata:
+      labels:
+        app: ingress
+    spec:
+      containers:
+        - name: ingress
+          image: quay.io/cloudservices/insights-ingress:latest
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: INGRESS_KAFKABROKERS
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-credentials
+                  key: bootstrap-servers
+            - name: INGRESS_STAGEBUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: bucket-perma
+            - name: INGRESS_REJECTBUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: bucket-rejected
+            - name: INGRESS_VALID_UPLOAD_TYPES
+              value: "openshift"
+            - name: OPENSHIFT_BUILD_COMMIT
+              value: "unknown"
+            - name: INGRESS_MINIODEV
+              value: "true"
+            - name: INGRESS_MINIOACCESSKEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: access-key
+            - name: INGRESS_MINIOSECRETKEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: secret-key
+            - name: INGRESS_MINIOENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: endpoint
+            - name: INGRESS_KAFKA_BROKERS
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-credentials
+                  key: bootstrap-servers
+            - name: INGRESS_AUTH
+              value: "true"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+---
+# Service: ingress
+apiVersion: v1
+kind: Service
+metadata:
+  name: ingress
+  namespace: edp-processing
+  labels:
+    app: ingress
+spec:
+  type: ClusterIP
+  selector:
+    app: ingress
+  ports:
+    - name: http
+      protocol: TCP
+      port: 3000
+      targetPort: 3000

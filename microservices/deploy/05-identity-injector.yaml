@@ -1,0 +1,149 @@
+# Identity Injector - acts like 3scale for on-prem
+# Adds x-rh-identity header to all requests and forwards to backend
+# This allows any service to query smart-proxy without needing auth
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: identity-injector-config
+  namespace: edp-processing
+data:
+  nginx.conf: |
+    # Write PID to writable location
+    pid /tmp/nginx.pid;
+
+    events {
+      worker_connections 1024;
+    }
+
+    http {
+      # Use writable temp paths (OpenShift security)
+      proxy_temp_path /tmp/proxy_temp;
+      client_body_temp_path /tmp/client_temp;
+      fastcgi_temp_path /tmp/fastcgi_temp;
+      uwsgi_temp_path /tmp/uwsgi_temp;
+      scgi_temp_path /tmp/scgi_temp;
+
+      # Upstream backends
+      upstream smart_proxy {
+        server smart-proxy.edp-processing.svc.cluster.local:8080;
+      }
+
+      upstream ingress {
+        server ingress.edp-processing.svc.cluster.local:3000;
+      }
+
+      server {
+        listen 8080;
+
+        # Upload path - proxy to ingress with identity
+        location /api/ingress/ {
+          # Add x-rh-identity header
+          # {"identity":{"type":"User","account_number":"0000001","org_id":"000001","internal":{"org_id":"000001"}}}
+          proxy_set_header x-rh-identity "eyJpZGVudGl0eSI6IHsidHlwZSI6ICJVc2VyIiwgImFjY291bnRfbnVtYmVyIjogIjAwMDAwMDEiLCAib3JnX2lkIjogIjAwMDAwMSIsICJpbnRlcm5hbCI6IHsib3JnX2lkIjogIjAwMDAwMSJ9fX0=";
+
+          # Preserve original headers
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+
+          # Forward to ingress
+          proxy_pass http://ingress;
+
+          # Timeouts for large uploads
+          proxy_connect_timeout 60s;
+          proxy_send_timeout 300s;
+          proxy_read_timeout 300s;
+
+          # Allow large uploads
+          client_max_body_size 100M;
+        }
+
+        # Query path - proxy to smart-proxy with identity
+        location / {
+          # Add x-rh-identity header
+          # {"identity":{"type":"User","account_number":"0000001","org_id":"000001","internal":{"org_id":"000001"}}}
+          proxy_set_header x-rh-identity "eyJpZGVudGl0eSI6IHsidHlwZSI6ICJVc2VyIiwgImFjY291bnRfbnVtYmVyIjogIjAwMDAwMDEiLCAib3JnX2lkIjogIjAwMDAwMSIsICJpbnRlcm5hbCI6IHsib3JnX2lkIjogIjAwMDAwMSJ9fX0=";
+
+          # Preserve original headers
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+
+          # Forward to smart-proxy
+          proxy_pass http://smart_proxy;
+
+          # Timeouts
+          proxy_connect_timeout 30s;
+          proxy_send_timeout 30s;
+          proxy_read_timeout 30s;
+        }
+
+        # Health check
+        location /healthz {
+          return 200 "OK\n";
+          add_header Content-Type text/plain;
+        }
+      }
+    }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: identity-injector
+  namespace: edp-processing
+  labels:
+    app: identity-injector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: identity-injector
+  template:
+    metadata:
+      labels:
+        app: identity-injector
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.25-alpine
+          ports:
+            - containerPort: 8080
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        - name: config
+          configMap:
+            name: identity-injector-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: identity-injector
+  namespace: edp-processing
+  labels:
+    app: identity-injector
+spec:
+  type: ClusterIP
+  selector:
+    app: identity-injector
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8080
+      targetPort: 8080
