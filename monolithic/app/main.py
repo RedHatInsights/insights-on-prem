@@ -51,13 +51,23 @@ async def startup_event():
         logger.info("Database initialized successfully")
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
+        raise
+
+    # Initialize processor config and components (fails if config missing or packages can't load)
+    try:
+        registry.get_processor_config()
+        logger.info("Processor configuration loaded successfully")
+    except Exception as e:
+        logger.error(f"Failed to load processor configuration: {e}", exc_info=True)
+        raise
 
     # Initialize content service (loads YAML/markdown files into memory, like content-service)
     try:
-        content_service = registry.get_content_service()
+        registry.get_content_service()
         logger.info("Content service initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize content service: {e}", exc_info=True)
+        raise
 
 
 @app.get("/")

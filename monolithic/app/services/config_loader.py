@@ -21,21 +21,11 @@ def load_insights_config(config_path: str = "config.yml") -> Dict:
     :return: Configuration dictionary
     :raises ProcessingError: If config file cannot be loaded
     """
-    try:
-        if not os.path.exists(config_path):
-            logger.warning(f"Config file {config_path} not found, using defaults")
-            return {
-                "plugins": {"packages": [], "configs": []},
-                "service": {
-                    "extract_timeout": 300,
-                    "extract_tmp_dir": settings.temp_upload_dir,
-                    "format": "insights.formats._json.JsonFormat",
-                    "target_components": [],
-                    "unpacked_archive_size_limit": -1,
-                },
-                "logging": {},
-            }
+    if not os.path.exists(config_path):
+        logger.error(f"Config file {config_path} not found")
+        raise ProcessingError(f"Configuration file not found: {config_path}")
 
+    try:
         with open(config_path, "r") as f:
             config = yaml.safe_load(f)
 
@@ -57,20 +47,13 @@ def load_insights_components(config: Dict) -> None:
     packages = plugins.get("packages", [])
 
     # Load each package using dr.load_components
-    loaded_packages = []
-    failed_packages = []
-
     for package in packages:
+        logger.info(f"Loading package: {package}")
         try:
-            logger.info(f"Loading package: {package}")
             dr.load_components(package, continue_on_error=False)
-            loaded_packages.append(package)
-        except ImportError as e:
-            logger.warning(f"Package {package} not available: {e}")
-            failed_packages.append(package)
         except Exception as e:
             logger.error(f"Failed to load package {package}: {e}")
-            failed_packages.append(package)
+            raise ProcessingError(f"Failed to load required package '{package}': {str(e)}")
 
     # Apply default enabled components
     apply_default_enabled(plugins)
@@ -78,9 +61,5 @@ def load_insights_components(config: Dict) -> None:
     # Apply component-specific configurations
     apply_configs(plugins)
 
-    if loaded_packages:
-        logger.info(f"Successfully loaded packages: {', '.join(loaded_packages)}")
-    if failed_packages:
-        logger.warning(f"Failed to load packages: {', '.join(failed_packages)}")
-
+    logger.info(f"Successfully loaded packages: {', '.join(packages)}")
     logger.info("Insights-core components loading completed")
