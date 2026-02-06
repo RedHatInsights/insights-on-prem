@@ -6,10 +6,9 @@ ENV HOME=/app \
     VENV=/app-venv \
     REQUESTS_CA_BUNDLE=/etc/pki/tls/certs/ca-bundle.crt
 
-# Download Red Hat corporate certificates - same as ccx-data-pipeline
-ADD https://certs.corp.redhat.com/certs/2022-IT-Root-CA.pem https://certs.corp.redhat.com/certs/Current-IT-Root-CAs.pem /etc/pki/ca-trust/source/anchors/
-
 WORKDIR $HOME
+
+COPY --from=rules /etc/pki/ca-trust/source/anchors/Current-IT-Root-CAs.pem /etc/pki/ca-trust/source/anchors/
 
 COPY --from=rules /app/content/content /app/content
 
