@@ -9,6 +9,8 @@ import yaml
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from app.exceptions import ProcessingError
+
 logger = logging.getLogger(__name__)
 
 
@@ -23,13 +25,13 @@ class YAMLContentParser:
         """
         if content_path is None:
             # Default to rules-content in project root
-            self.content_path = Path(__file__).parent.parent / "content" 
+            self.content_path = Path(__file__).parent.parent / "content"
         else:
             self.content_path = Path(content_path)
 
         if not self.content_path.exists():
-            logger.warning(f"Content path {self.content_path} does not exist")
-            self.content_path = None
+            logger.error(f"Content path {self.content_path} does not exist")
+            raise ProcessingError(f"Rules content directory not found: {self.content_path}")
 
         # Load impact mapping from config.yaml
         self.impact_mapping = self._load_impact_mapping()
@@ -40,9 +42,6 @@ class YAMLContentParser:
 
         :return: Dictionary mapping impact names to numeric values (1-4)
         """
-        if not self.content_path:
-            return {}
-
         config_file = self.content_path / "config.yaml"
         if not config_file.exists():
             logger.warning(f"Config file {config_file} not found")
@@ -64,10 +63,6 @@ class YAMLContentParser:
 
         :return: List of rule content dictionaries
         """
-        if not self.content_path:
-            logger.warning("Content path not available, skipping parsing")
-            return []
-
         rules_content = []
 
         # Parse external rules - scan all subdirectories (rules, ocs, dvo, etc.)
