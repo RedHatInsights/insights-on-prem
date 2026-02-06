@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class ReportService:
-    """Service for managing cluster reports and rule hits."""
+    """Service providing cluster reports and rule hits data."""
 
     def __init__(self, content_service: ContentService):
         """
