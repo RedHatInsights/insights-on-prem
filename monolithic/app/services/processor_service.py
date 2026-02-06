@@ -231,35 +231,45 @@ class ProcessorService:
         # Extract rule hits from results
         rule_hits = self.extract_rule_hits(results_json)
 
-        # Save main report
-        report_data = {
-            "cluster_id": cluster_id,
-            "rule_count": len(rule_hits),
-            "processed_at": datetime.utcnow().isoformat(),
-            "results": results_json,
-        }
+        try:
+            # Save main report
+            report_data = {
+                "cluster_id": cluster_id,
+                "rule_count": len(rule_hits),
+                "processed_at": datetime.utcnow().isoformat(),
+                "results": results_json,
+            }
 
-        Report.upsert(
-            db,
-            cluster=cluster_id,
-            report=json.dumps(report_data),
-            gathered_at=datetime.utcnow(),
-        )
-
-        # Clear existing rule hits for this cluster
-        RuleHit.delete_for_cluster(db, cluster_id)
-
-        # Save new rule hits
-        for hit in rule_hits:
-            RuleHit.upsert(
+            Report.upsert(
                 db,
-                cluster_id=cluster_id,
-                rule_fqdn=hit["rule_fqdn"],
-                error_key=hit["error_key"],
+                cluster=cluster_id,
+                report=json.dumps(report_data),
+                gathered_at=datetime.utcnow(),
             )
 
-        logger.info(f"Saved {len(rule_hits)} rule hits for cluster {cluster_id}")
-        return len(rule_hits)
+            # Clear existing rule hits for this cluster
+            RuleHit.delete_for_cluster(db, cluster_id)
+
+            # Save new rule hits
+            for hit in rule_hits:
+                RuleHit.upsert(
+                    db,
+                    cluster_id=cluster_id,
+                    rule_fqdn=hit["rule_fqdn"],
+                    error_key=hit["error_key"],
+                )
+
+            # Commit the transaction
+            db.commit()
+
+            logger.info(f"Saved {len(rule_hits)} rule hits for cluster {cluster_id}")
+            return len(rule_hits)
+
+        except Exception as e:
+            # Rollback on any error
+            db.rollback()
+            logger.error(f"Failed to save results for cluster {cluster_id}: {e}", exc_info=True)
+            raise ProcessingError(f"Database save failed: {str(e)}")
 
     def process_archive(self, db: Session, archive_path: str) -> Tuple[str, int]:
         """

@@ -66,7 +66,6 @@ class Report(Base):
 
         # Execute the statement
         db.execute(stmt)
-        db.commit()
 
         # Fetch and return the record
         result = db.query(cls).filter_by(cluster=cluster).one()
@@ -130,7 +129,6 @@ class RuleHit(Base):
 
         # Execute the statement
         db.execute(stmt)
-        db.commit()
 
         # Fetch and return the record
         result = (
@@ -156,5 +154,4 @@ class RuleHit(Base):
         count = (
             db.query(cls).filter_by(cluster_id=cluster_id).delete()
         )
-        db.commit()
         return count
