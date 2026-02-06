@@ -10,8 +10,6 @@ WORKDIR $HOME
 
 COPY --from=rules /etc/pki/ca-trust/source/anchors/Current-IT-Root-CAs.pem /etc/pki/ca-trust/source/anchors/
 
-COPY --from=rules /app/content/content /app/content
-
 ENV PATH="$VENV/bin:$PATH"
 
 # Install dependencies and setup - matching ccx-data-pipeline approach
@@ -32,7 +30,12 @@ ENV PYTHONDONTWRITEBYTECODE=1
 # Copy application code
 COPY . $HOME
 
+# Copy rules content
+COPY --from=rules /app/content/content /app/content
+
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy rules content from rules image (after COPY . to avoid being overwritten)
 
 # Expose port
 EXPOSE 8000

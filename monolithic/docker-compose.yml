@@ -37,7 +37,11 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./:/app
+      - ./app:/app/app
+      - ./migrations:/app/migrations
+      - ./tests:/app/tests
+      - ./config.yml:/app/config.yml
+      - ./alembic.ini:/app/alembic.ini
       - temp_uploads:/tmp/insights-uploads
     depends_on:
       postgres:
