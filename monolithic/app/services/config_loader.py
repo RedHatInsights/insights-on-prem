@@ -46,7 +46,7 @@ def load_insights_components(config: Dict) -> None:
     plugins = config.get("plugins", {})
     packages = plugins.get("packages", [])
 
-    # Load each package using dr.load_components
+    # Load each package using dr.load_components from insights-core module
     for package in packages:
         logger.info(f"Loading package: {package}")
         try:
