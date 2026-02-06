@@ -1,6 +1,6 @@
 """Database models for Insights On Premise."""
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, BigInteger, DateTime, PrimaryKeyConstraint
+from sqlalchemy import Column, Integer, String, DateTime, PrimaryKeyConstraint
 from sqlalchemy.dialects.postgresql import VARCHAR, insert
 from sqlalchemy.orm import Session
 
@@ -20,7 +20,6 @@ class Report(Base):
     report = Column(VARCHAR, nullable=False)
     reported_at = Column(DateTime, nullable=True)
     last_checked_at = Column(DateTime, nullable=True)
-    kafka_offset = Column(BigInteger, default=0)
     gathered_at = Column(DateTime, nullable=True)
 
     @classmethod
@@ -49,7 +48,6 @@ class Report(Base):
             reported_at=now,
             last_checked_at=now,
             gathered_at=gathered_at or now,
-            kafka_offset=0,
         )
 
         # On conflict, update the report and timestamps

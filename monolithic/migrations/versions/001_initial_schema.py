@@ -24,7 +24,6 @@ def upgrade() -> None:
         sa.Column('report', sa.VARCHAR(), nullable=False),
         sa.Column('reported_at', sa.DateTime(), nullable=True),
         sa.Column('last_checked_at', sa.DateTime(), nullable=True),
-        sa.Column('kafka_offset', sa.BigInteger(), server_default='0', nullable=True),
         sa.Column('gathered_at', sa.DateTime(), nullable=True),
         sa.PrimaryKeyConstraint('cluster', name='report_pkey')
     )
