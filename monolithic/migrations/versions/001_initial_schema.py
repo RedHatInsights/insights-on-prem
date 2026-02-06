@@ -45,14 +45,6 @@ def upgrade() -> None:
     op.create_index('idx_rule_hit_cluster', 'rule_hit', ['cluster_id'])
     op.create_index('idx_rule_hit_rule_fqdn', 'rule_hit', ['rule_fqdn'])
 
-    # Create report_info table
-    op.create_table(
-        'report_info',
-        sa.Column('cluster_id', sa.VARCHAR(), nullable=False),
-        sa.Column('version_info', sa.VARCHAR(), nullable=False),
-        sa.PrimaryKeyConstraint('cluster_id', name='report_info_pkey')
-    )
-
 
 def downgrade() -> None:
     # Drop indexes
@@ -61,6 +53,5 @@ def downgrade() -> None:
     op.drop_index('idx_report_last_checked', table_name='report')
 
     # Drop tables
-    op.drop_table('report_info')
     op.drop_table('rule_hit')
     op.drop_table('report')

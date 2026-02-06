@@ -11,7 +11,7 @@ from app.database import Base
 from app.config import get_settings
 
 # Import all models to ensure they're registered with Base
-from app.models import Report, RuleHit, ReportInfo
+from app.models import Report, RuleHit
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

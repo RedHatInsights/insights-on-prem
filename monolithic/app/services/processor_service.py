@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 from io import StringIO
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import List, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -15,7 +15,7 @@ from insights.core.hydration import initialize_broker
 from insights.formats.text import HumanReadableFormat
 
 from app.config import get_settings
-from app.models import Report, RuleHit, ReportInfo
+from app.models import Report, RuleHit
 from app.exceptions import ProcessingError
 
 logger = logging.getLogger(__name__)
@@ -130,12 +130,12 @@ class ProcessorService:
 
         raise ProcessingError("Could not find cluster ID. Missing config/id file in archive.")
 
-    def process_with_insights_core(self, archive_path: str) -> Tuple[str, str, Dict]:
+    def process_with_insights_core(self, archive_path: str) -> Tuple[str, str]:
         """
         Process archive with insights-core.
 
         :param archive_path: Path to archive file
-        :return: Tuple of (cluster_id, results_json, version_info)
+        :return: Tuple of (cluster_id, results_json)
         :raises ProcessingError: If processing fails
         """
         try:
@@ -173,15 +173,7 @@ class ProcessorService:
                 logger.info(f"Processing completed for cluster {cluster_id}")
                 logger.debug(f"Result length: {len(result)} chars")
 
-                # Extract version info
-                version_info = {
-                    "insights_core_version": "unknown",
-                    "processed_at": datetime.utcnow().isoformat(),
-                    "formatter": str(self.Formatter),
-                    "components_count": len(self.target_components),
-                }
-
-                return cluster_id, result, version_info
+                return cluster_id, result
 
         except Exception as e:
             logger.error(f"insights-core processing failed: {e}", exc_info=True)
@@ -227,14 +219,13 @@ class ProcessorService:
 
         return rule_hits
 
-    def save_results(self, db: Session, cluster_id: str, results_json: str, version_info: Dict) -> int:
+    def save_results(self, db: Session, cluster_id: str, results_json: str) -> int:
         """
         Save processing results to database.
 
         :param db: Database session
         :param cluster_id: Cluster identifier
         :param results_json: JSON results from insights-core
-        :param version_info: Version information dictionary
         :return: Number of rule hits saved
         """
         # Extract rule hits from results
@@ -267,13 +258,6 @@ class ProcessorService:
                 error_key=hit["error_key"],
             )
 
-        # Save report info
-        ReportInfo.upsert(
-            db,
-            cluster_id=cluster_id,
-            version_info=json.dumps(version_info),
-        )
-
         logger.info(f"Saved {len(rule_hits)} rule hits for cluster {cluster_id}")
         return len(rule_hits)
 
@@ -289,12 +273,10 @@ class ProcessorService:
         logger.info(f"Starting archive processing: {archive_path}")
 
         # Process with insights-core
-        cluster_id, results_json, version_info = self.process_with_insights_core(
-            archive_path
-        )
+        cluster_id, results_json = self.process_with_insights_core(archive_path)
 
         # Save to database
-        rules_count = self.save_results(db, cluster_id, results_json, version_info)
+        rules_count = self.save_results(db, cluster_id, results_json)
 
         logger.info(f"Completed processing for cluster {cluster_id}")
         return cluster_id, rules_count
