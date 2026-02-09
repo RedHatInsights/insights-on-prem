@@ -30,7 +30,7 @@ setup_databases() {
     oc get ns edp-processing &>/dev/null || oc apply -f deploy/00-namespace.yaml
     oc apply -f deploy/01-secrets.yaml
     oc apply -f deploy/02-infrastructure.yaml
-    for svc in postgresql minio redis notification-db; do wait_ready edp-processing app=$svc $svc; done
+    for svc in postgresql minio redis; do wait_ready edp-processing app=$svc $svc; done
     oc get pods -n edp-processing
 }
 
@@ -38,9 +38,12 @@ setup_edp_services() {
     echo "=== Services ==="
     oc get ns edp-processing &>/dev/null || { echo "❌ Run databases first"; return 1; }
     oc get kafka edp-kafka -n kafka &>/dev/null || { echo "❌ Run kafka first"; return 1; }
-    oc apply -f deploy/04-application-services.yaml
+    oc apply -f deploy/04-ingestion.yaml
+    oc apply -f deploy/05-writers.yaml
+    oc apply -f deploy/06-api-services.yaml
+    oc apply -f deploy/07-upgrades.yaml
     for svc in ingress ccx-data-pipeline db-writer aggregator smart-proxy; do wait_ready edp-processing app=$svc $svc; done
-    oc apply -f deploy/05-identity-injector.yaml
+    oc apply -f deploy/08-identity-injector.yaml
     wait_ready edp-processing app=identity-injector identity-injector
     oc get pods -n edp-processing
     echo "✓ All services deployed and ready"
@@ -70,7 +73,10 @@ configure_insights() {
     oc delete pod -n openshift-insights -l app=insights-operator
     oc wait --for=condition=ready pod -l app=insights-operator -n openshift-insights --timeout=60s
     echo "✓ Endpoint: http://identity-injector.edp-processing.svc.cluster.local:8080/api/ingress/v1/upload"
-    echo "Run './verify-pipeline.sh' to verify archive processing"
+    echo "Triggering initial upload..."
+    sleep 10
+    oc delete pod -n openshift-insights -l app=insights-operator
+    echo "✓ Initial upload triggered - run './verify-pipeline.sh' after 30s to verify"
 }
 
 configure_acm_client() {
@@ -106,7 +112,7 @@ cleanup() {
 
 restart_infra() {
     oc rollout restart deployment/{redis,mock-oauth2-server,rhobs-mock,identity-injector} -n edp-processing
-    oc rollout restart statefulset/{postgresql,notification-db,minio} -n edp-processing
+    oc rollout restart statefulset/{postgresql,minio} -n edp-processing
     echo "✓ Restarted"
 }
 
@@ -118,12 +124,12 @@ verify() {
     oc get kafka edp-kafka -n kafka -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null | grep -q "True" && echo "✓ Cluster" || { echo "❌ Cluster"; FAILED=1; }
 
     echo -e "\n=== Infrastructure ==="
-    for app in postgresql notification-db redis minio mock-oauth2-server rhobs-mock identity-injector; do
+    for app in postgresql redis minio mock-oauth2-server rhobs-mock identity-injector; do
         check_pod edp-processing app=$app $app
     done
 
     echo -e "\n=== Processing ==="
-    for app in ingress ccx-data-pipeline dvo-extractor db-writer dvo-writer cache-writer aggregator smart-proxy content-service ccx-upgrades-data-eng ccx-upgrades-inference notification-writer; do
+    for app in ingress ccx-data-pipeline dvo-extractor db-writer dvo-writer cache-writer aggregator smart-proxy content-service ccx-upgrades-data-eng ccx-upgrades-inference; do
         check_pod edp-processing app=$app $app
     done
 

@@ -176,14 +176,17 @@ oc wait --for=condition=ready pod -l app=postgresql -n edp-processing --timeout=
 oc wait --for=condition=ready pod -l app=minio -n edp-processing --timeout=300s
 
 # Deploy application services
-oc apply -f deploy/04-application-services.yaml
+oc apply -f deploy/04-ingestion.yaml
+oc apply -f deploy/05-writers.yaml
+oc apply -f deploy/06-api-services.yaml
+oc apply -f deploy/07-upgrades.yaml
 
 # Wait for services to be ready
 oc wait --for=condition=ready pod -l app=ingress -n edp-processing --timeout=300s
 oc wait --for=condition=ready pod -l app=smart-proxy -n edp-processing --timeout=300s
 
 # Deploy identity-injector (requires smart-proxy to exist first)
-oc apply -f deploy/05-identity-injector.yaml
+oc apply -f deploy/08-identity-injector.yaml
 
 # Wait for identity-injector to be ready
 oc wait --for=condition=ready pod -l app=identity-injector -n edp-processing --timeout=300s
@@ -220,8 +223,6 @@ ingress-67f47c644-9qkjb                   1/1     Running     0          100s
 minio-0                                   1/1     Running     0          2m23s
 minio-create-buckets-cc5xg                0/1     Completed   0          2m22s
 mock-oauth2-server-5bd8bd579-pmbrk        1/1     Running     0          2m24s
-notification-db-0                         1/1     Running     0          2m25s
-notification-writer-5497b7d57d-k4mjx      1/1     Running     0          100s
 postgresql-0                              1/1     Running     0          2m26s
 redis-5f6b544485-wmzbj                    1/1     Running     0          2m25s
 rhobs-mock-85895c697b-ct5b7               1/1     Running     0          2m23s
@@ -575,7 +576,11 @@ To remove the entire EDP stack:
 
 ```bash
 # Delete application services
-oc delete -f deploy/04-application-services.yaml
+oc delete -f deploy/08-identity-injector.yaml
+oc delete -f deploy/07-upgrades.yaml
+oc delete -f deploy/06-api-services.yaml
+oc delete -f deploy/05-writers.yaml
+oc delete -f deploy/04-ingestion.yaml
 
 # Delete infrastructure
 oc delete -f deploy/02-infrastructure.yaml
