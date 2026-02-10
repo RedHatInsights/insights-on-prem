@@ -11,3 +11,7 @@ htmlcov
 README.md
 docker-compose.yml
 Dockerfile
+.dockerignore
+tests
+deploy
+deploy.sh
