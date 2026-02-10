@@ -11,7 +11,7 @@ def normalize_rule_fqdn(rule_fqdn: str) -> str:
     :return: Normalized rule FQDN without .report suffix
     """
     if rule_fqdn.endswith(".report"):
-        return rule_fqdn.replace(".report", "")
+        return rule_fqdn[:-len(".report")]
     return rule_fqdn
 
 
