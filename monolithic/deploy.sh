@@ -24,6 +24,7 @@ oc apply -f deploy/service.yml --namespace insights-on-prem-poc
 echo "6. Configuring OpenShift insights-operator..."
 # Apply insights-operator ConfigMap to redirect uploads to on-premise service
 oc apply -f deploy/insights-config.yml
+oc rollout restart -n openshift-insights deployment insights-operator
 
 echo "7. Pausing MultiClusterHub operator..."
 # Pause the operator to prevent it from reverting our changes in insights-client deployment
