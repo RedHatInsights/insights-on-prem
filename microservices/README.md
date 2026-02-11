@@ -460,6 +460,9 @@ oc logs -n open-cluster-management deployment/insights-client -f
 
 # 7. Check PolicyReports created by insights-client
 oc get policyreports -A
+
+# 8. View detailed PolicyReport for local-cluster
+oc describe policyreport -n local-cluster local-cluster-policyreport
 ```
 
 ### Verify the Pipeline is Working
@@ -467,7 +470,14 @@ oc get policyreports -A
 **Quick verification using the script:**
 
 ```bash
+# Run basic checks
 ./verify-pipeline.sh
+
+# Run with verbose output (shows commands and matching log lines)
+./verify-pipeline.sh -v
+
+# View detailed PolicyReport (if ACM is installed)
+oc describe policyreport -n local-cluster local-cluster-policyreport
 ```
 
 **Manual verification:**

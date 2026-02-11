@@ -86,6 +86,24 @@ if oc get deployment insights-client -n open-cluster-management &>/dev/null; the
         echo "⚠️  (not configured)"
         $VERBOSE && echo
     fi
+
+    # Check PolicyReport created by ACM
+    echo -n "ACM PolicyReport: "
+    if $VERBOSE; then
+        echo
+        echo "  Command: oc get policyreport -n local-cluster local-cluster-policyreport"
+    fi
+    if oc get policyreport -n local-cluster local-cluster-policyreport &>/dev/null; then
+        POLICY_COUNT=$(oc get policyreport -n local-cluster local-cluster-policyreport -o jsonpath='{.results}' 2>/dev/null | grep -o '"result":"[^"]*"' | wc -l | tr -d ' ')
+        echo "✓ (${POLICY_COUNT} results)"
+        if $VERBOSE; then
+            echo "  Run: oc describe policyreport -n local-cluster local-cluster-policyreport"
+            echo
+        fi
+    else
+        echo "⚠️  (not created yet)"
+        $VERBOSE && echo
+    fi
 fi
 
 # Measure end-to-end latency from database timestamps
