@@ -35,6 +35,10 @@ echo "8. Configuring ACM insights-client..."
 oc set env deployment/insights-client -n open-cluster-management \
   CCX_SERVER=http://insights-on-prem.insights-on-prem-poc.svc.cluster.local:8000/api/v2
 
+# Set insights-client poll interval to 1 minute for demo purposes
+oc set env deployment/insights-client -n open-cluster-management \
+  POLL_INTERVAL=1
+
 echo "9. Waiting for deployment to roll out..."
 oc rollout status deployment/insights-client -n open-cluster-management --timeout=120s
 
