@@ -33,6 +33,8 @@ Total: **20 pods**
 
 ## Architecture
 
+![EDP Architecture](docs/on_prem_done.png)
+
 The on-prem deployment consists of two main data paths:
 
 **Upload Path** (insights-operator → identity-injector → ingress → Kafka → processing):

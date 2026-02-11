@@ -225,7 +225,7 @@ spec:
         - name: rhobs-mock
           image: quay.io/redhat-services-prod/obsint-processing-tenant/obsint-mocks/obsint-mocks:latest
           ports:
-            - containerPort: 8080
+            - containerPort: 8000
               name: http
           resources:
             requests:
@@ -252,7 +252,7 @@ spec:
     - name: http
       protocol: TCP
       port: 8080
-      targetPort: 8080
+      targetPort: 8000
 
 ---
 # MinIO StatefulSet (S3-compatible storage)
