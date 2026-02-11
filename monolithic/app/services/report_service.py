@@ -25,13 +25,12 @@ class ReportService:
         """
         self.content_service = content_service
 
-    def get_cluster_report_v2(self, db: Session, cluster_id: str, get_disabled: bool = False) -> ReportV2:
+    def get_cluster_report_v2(self, db: Session, cluster_id: str) -> ReportV2:
         """
         Fetch v2 format report for a specific cluster.
 
         :param db: Database session
         :param cluster_id: Cluster UUID
-        :param get_disabled: If true, disabled rules will be included
         :return: ReportV2 object
         :raises ValueError: If cluster report not found
         """

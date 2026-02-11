@@ -152,7 +152,6 @@ async def upload_archive(
 )
 async def get_cluster_report_v2(
     cluster_id: str,
-    get_disabled: bool = False,
     db: Session = Depends(get_db),
     report_service: ReportService = Depends(registry.get_report_service),
 ):
@@ -163,14 +162,13 @@ async def get_cluster_report_v2(
     following the v2 API format used by insights-results-smart-proxy.
 
     :param cluster_id: Cluster UUID
-    :param get_disabled: If true, disabled rules will be included
     :param db: Database session
     :param report_service: Report service instance
     :return: ReportResponseV2 with detailed report data
     :raises HTTPException: On not found or processing errors
     """
     try:
-        report_v2 = report_service.get_cluster_report_v2(db, cluster_id, get_disabled)
+        report_v2 = report_service.get_cluster_report_v2(db, cluster_id)
         return ReportResponseV2(
             report=report_v2,
             status="ok",
