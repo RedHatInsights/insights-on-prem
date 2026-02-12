@@ -34,6 +34,10 @@ data:
         server ingress.edp-processing.svc.cluster.local:3000;
       }
 
+      upstream thanos {
+        server thanos-querier.openshift-monitoring.svc.cluster.local:9091;
+      }
+
       server {
         listen 8080;
 
@@ -59,6 +63,38 @@ data:
 
           # Allow large uploads
           client_max_body_size 100M;
+        }
+
+        # RHOBS/Thanos path - translate RHOBS API to Thanos API and add ServiceAccount token
+        # /api/metrics/v1/telemeter/api/v1/* -> /api/v1/*
+        location ~ ^/api/metrics/v1/telemeter/api/v1/(.*)$ {
+          # Read ServiceAccount token using Lua
+          set_by_lua_block $token {
+            local file = io.open("/var/run/secrets/kubernetes.io/serviceaccount/token", "r")
+            if file then
+              local content = file:read("*all")
+              file:close()
+              return content
+            end
+            return ""
+          }
+
+          # Add Authorization header with ServiceAccount token
+          proxy_set_header Authorization "Bearer $token";
+
+          # Preserve original headers
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+          # Forward to Thanos with path translation
+          proxy_pass https://thanos/api/v1/$1$is_args$args;
+          proxy_ssl_verify off;
+
+          # Timeouts
+          proxy_connect_timeout 30s;
+          proxy_send_timeout 30s;
+          proxy_read_timeout 30s;
         }
 
         # Query path - proxy to smart-proxy with identity
@@ -110,13 +146,13 @@ spec:
     spec:
       containers:
         - name: nginx
-          image: nginx:1.25-alpine
+          image: openresty/openresty:1.25.3.1-alpine
           ports:
             - containerPort: 8080
               name: http
           volumeMounts:
             - name: config
-              mountPath: /etc/nginx/nginx.conf
+              mountPath: /usr/local/openresty/nginx/conf/nginx.conf
               subPath: nginx.conf
           resources:
             requests:

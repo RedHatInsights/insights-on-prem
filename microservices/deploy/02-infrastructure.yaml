@@ -203,58 +203,6 @@ spec:
       targetPort: 8080
 
 ---
-# RHOBS Mock Deployment
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: rhobs-mock
-  namespace: edp-processing
-  labels:
-    app: rhobs-mock
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: rhobs-mock
-  template:
-    metadata:
-      labels:
-        app: rhobs-mock
-    spec:
-      containers:
-        - name: rhobs-mock
-          image: quay.io/redhat-services-prod/obsint-processing-tenant/obsint-mocks/obsint-mocks:latest
-          ports:
-            - containerPort: 8000
-              name: http
-          resources:
-            requests:
-              cpu: 50m
-              memory: 128Mi
-            limits:
-              cpu: 200m
-              memory: 256Mi
-
----
-# RHOBS Mock Service
-apiVersion: v1
-kind: Service
-metadata:
-  name: rhobs-mock
-  namespace: edp-processing
-  labels:
-    app: rhobs-mock
-spec:
-  type: ClusterIP
-  selector:
-    app: rhobs-mock
-  ports:
-    - name: http
-      protocol: TCP
-      port: 8080
-      targetPort: 8000
-
----
 # MinIO StatefulSet (S3-compatible storage)
 apiVersion: apps/v1
 kind: StatefulSet

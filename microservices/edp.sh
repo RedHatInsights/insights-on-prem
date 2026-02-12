@@ -38,11 +38,12 @@ setup_edp_services() {
     echo "=== Services ==="
     oc get ns edp-processing &>/dev/null || { echo "❌ Run databases first"; return 1; }
     oc get kafka edp-kafka -n kafka &>/dev/null || { echo "❌ Run kafka first"; return 1; }
+    oc apply -f deploy/09-thanos-integration.yaml
     oc apply -f deploy/04-ingestion.yaml
     oc apply -f deploy/05-writers.yaml
     oc apply -f deploy/06-api-services.yaml
     oc apply -f deploy/07-upgrades.yaml
-    for svc in ingress ccx-data-pipeline db-writer aggregator smart-proxy; do wait_ready edp-processing app=$svc $svc; done
+    for svc in ingress ccx-data-pipeline db-writer aggregator smart-proxy ccx-upgrades-data-eng; do wait_ready edp-processing app=$svc $svc; done
     oc apply -f deploy/08-identity-injector.yaml
     wait_ready edp-processing app=identity-injector identity-injector
     oc get pods -n edp-processing
@@ -105,13 +106,14 @@ cleanup() {
     [ "$C" != "yes" ] && return 1
     oc get secret support -n openshift-config &>/dev/null && oc delete secret support -n openshift-config && \
         oc delete pod -n openshift-insights -l app=insights-operator 2>/dev/null || true
+    oc delete clusterrolebinding upgrades-monitoring-view 2>/dev/null || true
     for ns in edp-processing kafka; do oc delete ns $ns --wait=false 2>/dev/null; done
     oc wait --for=delete ns/edp-processing ns/kafka --timeout=120s 2>/dev/null || echo "⚠️  Deletion in progress"
     echo "✓ Cleanup complete"
 }
 
 restart_infra() {
-    oc rollout restart deployment/{redis,mock-oauth2-server,rhobs-mock,identity-injector} -n edp-processing
+    oc rollout restart deployment/{redis,mock-oauth2-server,identity-injector} -n edp-processing
     oc rollout restart statefulset/{postgresql,minio} -n edp-processing
     echo "✓ Restarted"
 }
@@ -124,7 +126,7 @@ verify() {
     oc get kafka edp-kafka -n kafka -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null | grep -q "True" && echo "✓ Cluster" || { echo "❌ Cluster"; FAILED=1; }
 
     echo -e "\n=== Infrastructure ==="
-    for app in postgresql redis minio mock-oauth2-server rhobs-mock identity-injector; do
+    for app in postgresql redis minio mock-oauth2-server identity-injector; do
         check_pod edp-processing app=$app $app
     done
 
