@@ -1,6 +1,6 @@
 """Database models for Insights On Premise."""
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, PrimaryKeyConstraint
+from sqlalchemy import Column, DateTime, PrimaryKeyConstraint
 from sqlalchemy.dialects.postgresql import VARCHAR, insert
 from sqlalchemy.orm import Session
 

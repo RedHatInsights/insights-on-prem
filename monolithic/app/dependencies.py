@@ -1,8 +1,6 @@
 """Dependency injection providers for FastAPI."""
 from typing import Dict, Optional
 
-from fastapi import Depends
-
 from app.config import get_settings
 from app.services.content_service import ContentService
 from app.services.report_service import ReportService

@@ -1,5 +1,4 @@
 """Utilities for building API responses."""
-from datetime import datetime
 from typing import Dict, Optional
 
 from app.schemas import RuleHitDetailedResponse

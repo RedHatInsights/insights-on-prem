@@ -2,7 +2,6 @@
 import logging
 import os
 import tempfile
-import uuid
 from datetime import datetime
 from typing import Tuple
 
@@ -12,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.schemas import UploadResponse
 from app.services.processor_service import ProcessorService
-from app.exceptions import ValidationError, ProcessingError
+from app.exceptions import ValidationError
 
 logger = logging.getLogger(__name__)
 
