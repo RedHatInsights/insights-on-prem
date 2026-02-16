@@ -7,13 +7,15 @@ This is a streamlined deployment of the EDP stack directly to an OpenShift clust
 The EDP consists of:
 
 ### Infrastructure Services
-- **PostgreSQL**: Two instances for aggregator and notification databases
+- **PostgreSQL**: Database for aggregator (notifications service removed)
 - **Kafka**: Message broker for data pipeline communication (Strimzi operator)
 - **Redis**: Cache for aggregator results
 - **MinIO**: S3-compatible storage for uploaded archives
 - **Mock OAuth2 Server**: For development/testing authentication
-- **RHOBS Mock**: For development/testing observability API
-- **Identity Injector**: Nginx proxy that adds x-rh-identity header (acts like 3scale for on-prem)
+- **Identity Injector**: Nginx proxy with three functions:
+  - Adds x-rh-identity header for smart-proxy/ingress requests (acts like 3scale)
+  - Proxies upgrades service to Thanos with ServiceAccount token authentication
+  - Translates RHOBS API paths to Thanos API paths
 
 ### Processing Services
 - **ingress**: HTTP endpoint for receiving archive uploads (port 3000)
@@ -27,9 +29,8 @@ The EDP consists of:
 - **content-service**: Provides recommendation content and metadata (port 8081)
 - **ccx-upgrades-data-eng**: Upgrade risk prediction data engineering service
 - **ccx-upgrades-inference**: ML inference service for upgrade risks
-- **notification-writer**: Writes notification events to database
 
-Total: **20 pods**
+Total: **16 pods**
 
 ## Architecture
 
@@ -50,7 +51,15 @@ The on-prem deployment consists of two main data paths:
 3. Smart-proxy validates identity and forwards to aggregator
 4. Aggregator queries PostgreSQL and returns results
 
-The identity-injector acts like 3scale in production - it adds authentication headers for on-prem deployments where clients don't send x-rh-identity.
+**Upgrades/Thanos Path** (ccx-upgrades-data-eng → identity-injector → Thanos → Prometheus):
+1. ccx-upgrades-data-eng queries cluster metrics using RHOBS API format
+2. Identity-injector translates path (/api/metrics/v1/telemeter/api/v1/* → /api/v1/*)
+3. Identity-injector adds ServiceAccount token authentication
+4. Thanos Querier returns real cluster metrics from Prometheus
+5. ccx-upgrades-data-eng processes metrics and sends to ccx-upgrades-inference
+6. ML service predicts upgrade risk based on cluster health
+
+The identity-injector acts as a multi-purpose proxy: adds x-rh-identity for on-prem deployments, and provides authenticated access to Thanos for the upgrades service.
 
 ## Quick Start
 
@@ -203,7 +212,7 @@ oc get pods -n edp-processing
 # Check Kafka
 oc get pods -n kafka
 
-# You should see all 20 pods in Running state
+# You should see all 16 pods in Running state (plus minio-create-buckets job in Completed state)
 ```
 
 Expected output:
@@ -227,7 +236,6 @@ minio-create-buckets-cc5xg                0/1     Completed   0          2m22s
 mock-oauth2-server-5bd8bd579-pmbrk        1/1     Running     0          2m24s
 postgresql-0                              1/1     Running     0          2m26s
 redis-5f6b544485-wmzbj                    1/1     Running     0          2m25s
-rhobs-mock-85895c697b-ct5b7               1/1     Running     0          2m23s
 smart-proxy-58f8ddffb9-xxwkl              1/1     Running     0          102s
 
 > oc get pods -n kafka
