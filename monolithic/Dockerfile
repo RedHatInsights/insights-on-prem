@@ -7,7 +7,6 @@ ENV HOME=/app \
     VENV=/app-venv \
     REQUESTS_CA_BUNDLE=/etc/pki/tls/certs/ca-bundle.crt \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
     PATH="/app-venv/bin:$PATH"
 
 WORKDIR $HOME
