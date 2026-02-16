@@ -117,7 +117,7 @@ oc logs -f deployment/insights-on-prem -n insights-on-prem-poc
 
 ## Database Access
 
-The application uses ACM's existing `search-postgres` database.
+The application uses ACM's existing `search-postgres` database. This serves as temporary solution until we get provided with shared DB from ACM, or we find a our own solution.
 
 **Connect to database:**
 ```bash
