@@ -32,7 +32,7 @@ GET /health
 
 ## Building and Pushing Multiarch Image
 
-Build and push a multiarch (amd64, arm64) image to Quay (this step is necessary because cluster nodes may run on different archicture than the development environment):
+Build and push a multiarch (amd64, arm64) image to Quay (this step is necessary because cluster nodes may run on different architecture than the development environment):
 
 ```bash
 # Login to Quay
