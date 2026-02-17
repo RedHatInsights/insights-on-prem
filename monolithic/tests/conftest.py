@@ -1,5 +1,4 @@
 """Pytest configuration and fixtures."""
-import os
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -15,8 +14,7 @@ def test_db():
 
     :return: SQLAlchemy Session instance for testing
     """
-    # Use in-memory SQLite for testing
-    SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
+    SQLALCHEMY_DATABASE_URL = "sqlite:///"
 
     test_engine = create_engine(
         SQLALCHEMY_DATABASE_URL,
@@ -52,7 +50,3 @@ def test_db():
     # Cleanup
     Base.metadata.drop_all(bind=test_engine)
     app.dependency_overrides.clear()
-
-    # Remove test db file
-    if os.path.exists("./test.db"):
-        os.remove("./test.db")
