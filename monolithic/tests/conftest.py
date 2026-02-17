@@ -8,7 +8,7 @@ from app.main import app
 
 
 @pytest.fixture(scope="function")
-def test_db():
+def database():
     """
     Create a test database for each test.
 
