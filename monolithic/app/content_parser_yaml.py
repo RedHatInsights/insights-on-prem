@@ -132,6 +132,9 @@ class YAMLContentParser:
         # Get plugin metadata
         plugin_info = plugin_data.get("plugin", {})
 
+        # Read plugin-level markdown files (used as fallback for error keys)
+        plugin_content = self._read_markdown_files(rule_dir)
+
         # Find all error key directories
         error_key_dirs = [d for d in rule_dir.iterdir() if d.is_dir() and not d.name.startswith(".")]
 
@@ -140,7 +143,7 @@ class YAMLContentParser:
             error_key = error_key_dir.name
 
             try:
-                content = self._parse_error_key_directory(error_key_dir)
+                content = self._parse_error_key_directory(error_key_dir, plugin_content)
 
                 # Merge with plugin-level metadata
                 # Handle impact - can be a string or int in metadata
@@ -188,14 +191,36 @@ class YAMLContentParser:
 
         return rules
 
-    def _parse_error_key_directory(self, error_key_dir: Path) -> Dict:
+    def _read_markdown_files(self, directory: Path) -> Dict:
+        """
+        Read markdown content files from a directory.
+
+        :param directory: Path to directory containing markdown files
+        :return: Dictionary mapping file type to content
+        """
+        content = {}
+        for md_type in ["generic", "reason", "resolution", "more_info"]:
+            md_file = directory / f"{md_type}.md"
+            if md_file.exists():
+                with open(md_file, "r", encoding="utf-8") as f:
+                    text = f.read().strip()
+                    if text:
+                        content[md_type] = text
+        return content
+
+    def _parse_error_key_directory(self, error_key_dir: Path, plugin_content: Dict) -> Dict:
         """
         Parse an error key directory containing metadata and markdown files.
 
+        Plugin-level markdown content is used as fallback when the error key
+        directory does not contain the corresponding file.
+
         :param error_key_dir: Path to error key directory
+        :param plugin_content: Plugin-level markdown content for fallback
         :return: Dictionary with content metadata
         """
-        content = {}
+        # Start with plugin-level markdown as defaults
+        content = dict(plugin_content)
 
         # Read metadata.yaml if it exists
         metadata_file = error_key_dir / "metadata.yaml"
@@ -205,11 +230,7 @@ class YAMLContentParser:
                 if metadata:
                     content.update(metadata)
 
-        # Read markdown files
-        for md_type in ["generic", "reason", "resolution", "more_info"]:
-            md_file = error_key_dir / f"{md_type}.md"
-            if md_file.exists():
-                with open(md_file, "r", encoding="utf-8") as f:
-                    content[md_type] = f.read().strip()
+        # Read error-key-level markdown files (override plugin-level)
+        content.update(self._read_markdown_files(error_key_dir))
 
         return content
