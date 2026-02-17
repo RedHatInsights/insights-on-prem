@@ -218,29 +218,29 @@ def _make_results_json(rules):
     return json.dumps({"reports": reports})
 
 
-def test_save_results_success(processor_service, test_db):
+def test_save_results_success(processor_service, database):
     """Test successful save of results."""
     cluster_id = "test-cluster-123"
     results_json = _make_results_json([
         ("ccx_rules_ocp.external.rules.example.report", "ERROR_KEY")
     ])
 
-    count = processor_service.save_results(test_db, cluster_id, results_json)
+    count = processor_service.save_results(database, cluster_id, results_json)
 
     assert count == 1
 
     # Verify report was saved
-    report = test_db.query(Report).filter_by(cluster=cluster_id).first()
+    report = database.query(Report).filter_by(cluster=cluster_id).first()
     assert report is not None
 
     # Verify rule hit was saved
-    rule_hit = test_db.query(RuleHit).filter_by(cluster_id=cluster_id).first()
+    rule_hit = database.query(RuleHit).filter_by(cluster_id=cluster_id).first()
     assert rule_hit is not None
     assert rule_hit.rule_fqdn == "ccx_rules_ocp.external.rules.example.report"
     assert rule_hit.error_key == "ERROR_KEY"
 
 
-def test_save_results_transaction_rollback_on_error(processor_service, test_db):
+def test_save_results_transaction_rollback_on_error(processor_service, database):
     """Test transaction rollback when save fails."""
     cluster_id = "test-cluster-123"
     results_json = _make_results_json([
@@ -250,55 +250,55 @@ def test_save_results_transaction_rollback_on_error(processor_service, test_db):
     # Mock RuleHit.upsert to raise an error
     with patch.object(RuleHit, 'upsert', side_effect=Exception("Database error")):
         with pytest.raises(ProcessingError, match="Database save failed"):
-            processor_service.save_results(test_db, cluster_id, results_json)
+            processor_service.save_results(database, cluster_id, results_json)
 
     # Verify nothing was committed
-    report = test_db.query(Report).filter_by(cluster=cluster_id).first()
+    report = database.query(Report).filter_by(cluster=cluster_id).first()
     assert report is None
 
-    rule_hit = test_db.query(RuleHit).filter_by(cluster_id=cluster_id).first()
+    rule_hit = database.query(RuleHit).filter_by(cluster_id=cluster_id).first()
     assert rule_hit is None
 
 
-def test_save_results_replaces_old_rule_hits(processor_service, test_db):
+def test_save_results_replaces_old_rule_hits(processor_service, database):
     """Test that old rule hits are replaced with new ones."""
     cluster_id = "test-cluster-123"
 
     # Save initial rule hits
-    RuleHit.upsert(test_db, cluster_id, "old_rule", "OLD_KEY")
-    test_db.commit()
+    RuleHit.upsert(database, cluster_id, "old_rule", "OLD_KEY")
+    database.commit()
 
     # Verify old rule exists
-    old_hits = test_db.query(RuleHit).filter_by(cluster_id=cluster_id).all()
+    old_hits = database.query(RuleHit).filter_by(cluster_id=cluster_id).all()
     assert len(old_hits) == 1
 
     # Save new results with different rules
     results_json = _make_results_json([("new_rule", "NEW_KEY")])
 
-    processor_service.save_results(test_db, cluster_id, results_json)
+    processor_service.save_results(database, cluster_id, results_json)
 
     # Verify only new rule exists
-    new_hits = test_db.query(RuleHit).filter_by(cluster_id=cluster_id).all()
+    new_hits = database.query(RuleHit).filter_by(cluster_id=cluster_id).all()
     assert len(new_hits) == 1
     assert new_hits[0].rule_fqdn == "new_rule"
     assert new_hits[0].error_key == "NEW_KEY"
 
 
-def test_save_results_empty_rule_hits(processor_service, test_db):
+def test_save_results_empty_rule_hits(processor_service, database):
     """Test saving results with no rule hits."""
     cluster_id = "test-cluster-123"
     results_json = json.dumps({"reports": []})
 
-    count = processor_service.save_results(test_db, cluster_id, results_json)
+    count = processor_service.save_results(database, cluster_id, results_json)
 
     assert count == 0
 
     # Verify report was still saved
-    report = test_db.query(Report).filter_by(cluster=cluster_id).first()
+    report = database.query(Report).filter_by(cluster=cluster_id).first()
     assert report is not None
 
     # Verify no rule hits
-    rule_hits = test_db.query(RuleHit).filter_by(cluster_id=cluster_id).all()
+    rule_hits = database.query(RuleHit).filter_by(cluster_id=cluster_id).all()
     assert len(rule_hits) == 0
 
 
@@ -310,7 +310,7 @@ def test_process_archive_success(
     mock_init_broker,
     mock_extract,
     processor_service,
-    test_db,
+    database,
     tmp_path
 ):
     """Test successful archive processing."""
@@ -340,19 +340,19 @@ def test_process_archive_success(
         mock_output.read.return_value = test_results
         mock_stringio.return_value = mock_output
 
-        cluster_id, count = processor_service.process_archive(test_db, "/fake/archive.tar.gz")
+        cluster_id, count = processor_service.process_archive(database, "/fake/archive.tar.gz")
 
     assert cluster_id == "test-cluster-123"
     assert count == 1
 
 
 @patch('app.services.processor_service.extract')
-def test_process_archive_extraction_fails(mock_extract, processor_service, test_db):
+def test_process_archive_extraction_fails(mock_extract, processor_service, database):
     """Test archive processing when extraction fails."""
     mock_extract.side_effect = Exception("Extraction failed")
 
     with pytest.raises(ProcessingError, match="Analysis failed"):
-        processor_service.process_archive(test_db, "/fake/archive.tar.gz")
+        processor_service.process_archive(database, "/fake/archive.tar.gz")
 
 
 @patch('app.services.processor_service.extract')
