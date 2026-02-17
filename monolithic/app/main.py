@@ -15,7 +15,7 @@ from app.schemas import (
     ErrorResponse,
     ReportResponseV2,
 )
-from app.services.config_loader import load_insights_config, load_insights_components
+from app.config_loader import load_insights_config, load_insights_components
 from app.services.report_service import ReportService
 from app.services.upload_service import UploadService
 from app.services.processor_service import ProcessorService
