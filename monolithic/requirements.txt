@@ -1,6 +1,6 @@
 # CCX packages require Red Hat internal Nexus repository
-# Using --extra-index-url to keep PyPI for standard packages
---extra-index-url https://nexus.corp.redhat.com/repository/obsint-pypi/simple
+# Using --index-url to keep PyPI for standard packages
+--index-url https://nexus.corp.redhat.com/repository/obsint-pypi/simple/
 
 # FastAPI and web framework
 fastapi>=0.109.0
@@ -14,7 +14,7 @@ alembic>=1.13.0
 
 # Insights-core and CCX packages
 insights-core>=3.2.26
-ccx-rules-ocp>=2025.12.09
+ccx-rules-ocp>=2026.02.13
 ccx-rules-processing>=0.0.3
 
 # Configuration and utilities
