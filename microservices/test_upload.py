@@ -7,9 +7,6 @@ Setup:
     source venv/bin/activate
     pip install -r requirements.txt
 
-    # Install molodec
-    pip install -U molodec --index-url https://nexus.corp.redhat.com/repository/obsint-pypi/simple
-
 Usage:
     python test_upload.py upload https://$INGRESS_URL
 """

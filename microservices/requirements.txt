@@ -1,4 +1,4 @@
---extra-index-url https://nexus.corp.redhat.com/repository/obsint-pypi/simple
+--index-url https://nexus.corp.redhat.com/repository/obsint-pypi/simple
 
 click>=8.0.0
 requests>=2.28.0

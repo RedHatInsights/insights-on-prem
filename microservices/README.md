@@ -276,9 +276,6 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
-# Install molodec for generating test archives
-pip install -U molodec --index-url https://nexus.corp.redhat.com/repository/obsint-pypi/simple
-
 # Upload test archive
 INGRESS_URL=$(oc get route ingress -n edp-processing -o jsonpath='{.spec.host}')
 python test_upload.py upload https://$INGRESS_URL
