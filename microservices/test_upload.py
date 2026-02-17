@@ -8,8 +8,7 @@ Setup:
     pip install -r requirements.txt
 
     # Install molodec
-    export PIP_INDEX_URL=https://repository.engineering.redhat.com/nexus/repository/insights-qe/simple
-    pip install -U molodec
+    pip install -U molodec --index-url https://nexus.corp.redhat.com/repository/obsint-pypi/simple
 
 Usage:
     python test_upload.py upload https://$INGRESS_URL

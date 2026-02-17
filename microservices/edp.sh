@@ -53,11 +53,11 @@ setup_edp_services() {
 expose_services() {
     echo "=== Routes ==="
     oc get ns edp-processing &>/dev/null || { echo "❌ Namespace not found"; return 1; }
-    for svc in "ingress:3000" "aggregator:8082" "smart-proxy:8080" "content-service:8081"; do
+    for svc in "ingress:3000" "smart-proxy:8080" "content-service:8081"; do
         IFS=: read name port <<< "$svc"
         oc get route $name -n edp-processing &>/dev/null || oc create route edge $name --service=$name --port=$port -n edp-processing
     done
-    for svc in ingress aggregator smart-proxy content-service; do
+    for svc in ingress smart-proxy content-service; do
         printf "%-16s https://%s\n" "$svc:" "$(oc get route $svc -n edp-processing -o jsonpath='{.spec.host}')"
     done
 }
@@ -142,7 +142,7 @@ verify() {
     done
 
     echo -e "\n=== Routes ==="
-    for r in ingress aggregator smart-proxy; do
+    for r in ingress smart-proxy; do
         oc get route $r -n edp-processing &>/dev/null && echo "✓ $r" || echo "⚠️  $r"
     done
 

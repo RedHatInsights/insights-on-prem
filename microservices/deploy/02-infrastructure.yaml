@@ -112,7 +112,7 @@ spec:
     spec:
       containers:
         - name: redis
-          image: redis:latest
+          image: docker.io/redis:latest
           command:
             - redis-server
             - --requirepass
@@ -297,7 +297,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: mc
-          image: minio/mc:latest
+          image: quay.io/minio/mc:latest
           env:
             - name: HOME
               value: /tmp

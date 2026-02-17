@@ -250,7 +250,7 @@ strimzi-cluster-operator-6c84667cb8-2n9f9    1/1     Running   0          5m59s
 
 ### Expose Services
 
-To test the data pipeline, expose the ingress and aggregator services:
+To test the data pipeline, expose the ingress and smart-proxy services:
 
 ```bash
 # Expose ingress for archive uploads
@@ -259,22 +259,16 @@ oc create route edge ingress \
   --port=3000 \
   -n edp-processing
 
-# Expose aggregator for querying results
-oc create route edge aggregator \
-  --service=aggregator \
-  --port=8082 \
-  -n edp-processing
-
-# Expose smart-proxy
+# Expose smart-proxy for querying results
 oc create route edge smart-proxy \
   --service=smart-proxy \
   --port=8080 \
   -n edp-processing
 ```
 
-### Option 1: Manual Upload Test Archive
+### Option 1: Manual Test Upload (Quick Testing)
 
-For quick testing, you can manually upload a test archive:
+Upload a test archive using a Python script to verify the pipeline works:
 
 ```bash
 # Setup Python environment (first time only)
@@ -283,8 +277,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # Install molodec for generating test archives
-export PIP_INDEX_URL=https://repository.engineering.redhat.com/nexus/repository/insights-qe/simple
-pip install -U molodec
+pip install -U molodec --index-url https://nexus.corp.redhat.com/repository/obsint-pypi/simple
 
 # Upload test archive
 INGRESS_URL=$(oc get route ingress -n edp-processing -o jsonpath='{.spec.host}')
@@ -298,16 +291,16 @@ Status Code: 202
 ✅ Archive uploaded successfully!
 ```
 
-### Option 2: Configure Local Insights Pipeline
+### Option 2: Use insights-operator
 
-This option configures the insights pipeline to use your local EDP stack instead of Red Hat's cloud services.
+Configure the cluster's insights-operator to automatically send real cluster data to the On prem solution instead of console.redhat.com.
 
-**Basic pipeline** (works on any OpenShift cluster):
-1. **insights-operator** → uploads cluster data to local **ingress:3000**
-2. Processing pipeline → processes the data and stores in database
+**Basic setup** (works on any OpenShift cluster):
+1. Configure **insights-operator** to upload to your EDP **ingress:3000**
+2. insights-operator automatically collects and uploads cluster data every 2 hours by default
 
-**Full pipeline with insights-client** (requires ACM):
-3. **insights-client** → fetches results from **identity-injector:8080** → **smart-proxy:8080** → **aggregator:8082** and creates PolicyReports
+**Full setup with ACM** (requires ACM installed):
+3. Configure **insights-client** to fetch processed results from **smart-proxy:8080** and create PolicyReports
 
 #### Step 1: Ingress and Identity-Injector Configuration
 
@@ -514,17 +507,6 @@ oc logs -n edp-processing deployment/db-writer --since=3h | grep "processing mes
 # "cluster":"00ff20e8-2326-4373-bce0-194ec01a59d1"
 # "issues found":0  <- This is normal for a healthy cluster!
 # "message":"Stored info report"
-```
-
-### Query Results from Aggregator
-
-```bash
-# Get the aggregator URL
-AGGREGATOR_URL=$(oc get route aggregator -n edp-processing -o jsonpath='{.spec.host}')
-
-# Query cluster reports (replace with your test cluster ID)
-CLUSTER_ID="9f1511c6-6ef4-48ef-8fe9-e6dfea7076f0"
-curl -sk "https://$AGGREGATOR_URL/api/v1/organizations/1/clusters/$CLUSTER_ID/reports" | jq
 ```
 
 ### Query Results from Smart Proxy
