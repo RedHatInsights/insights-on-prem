@@ -29,6 +29,16 @@ class UploadService:
         self.processor_service = processor_service
         self.settings = settings
 
+    def _get_archive_suffix(file: UploadFile) -> str:
+        suffix = ""
+        if file.filename.endswith('.tar.gz'):
+            suffix = '.tar.gz'
+        elif file.filename.endswith('.tgz'):
+            suffix = '.tgz'
+        elif file.filename.endswith('.tar'):
+            suffix = '.tar'
+        return suffix
+
     def validate_file(self, file: UploadFile, request_id: str) -> None:
         """
         Validate uploaded file.
@@ -41,7 +51,7 @@ class UploadService:
             logger.warning(f"Request {request_id}: No filename provided")
             raise ValidationError("No filename provided")
 
-        if not file.filename.endswith((".tar.gz", ".tgz", ".tar")):
+        if self._get_archive_suffix(file) == "":
             logger.warning(f"Request {request_id}: Invalid file format: {file.filename}")
             raise ValidationError("File must be a .tar, .tar.gz, or .tgz archive")
 
@@ -56,18 +66,10 @@ class UploadService:
         :return: Tuple of (temp_file_path, total_size)
         :raises ValidationError: If file size exceeds limit
         """
-        # Determine file suffix
-        if file.filename.endswith('.tar.gz'):
-            suffix = '.tar.gz'
-        elif file.filename.endswith('.tgz'):
-            suffix = '.tgz'
-        else:
-            suffix = '.tar'
-
         # Create temporary file
         with tempfile.NamedTemporaryFile(
             delete=False,
-            suffix=suffix,
+            suffix=self._get_archive_suffix(file),
             dir=self.settings.temp_upload_dir,
         ) as temp_file:
             temp_file_path = temp_file.name
