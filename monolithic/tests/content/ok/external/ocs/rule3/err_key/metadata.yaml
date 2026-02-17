@@ -1,0 +1,8 @@
+status: "active"
+publish_date: "2021-06-15T10:00:00+00:00"
+impact:
+  name: "Three"
+  impact: 3
+likelihood: 4
+tags:
+  - service_availability
