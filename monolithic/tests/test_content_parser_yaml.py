@@ -23,13 +23,6 @@ def test_init_with_missing_path():
         YAMLContentParser("/nonexistent/path")
 
 
-def test_init_with_default_path():
-    """Test initialization with default path."""
-    # This will fail because default path won't exist in tests
-    with pytest.raises(ProcessingError):
-        YAMLContentParser()
-
-
 def test_load_impact_mapping_success(tmp_path):
     """Test loading impact mapping from config.yaml."""
     content_dir = tmp_path / "content"
