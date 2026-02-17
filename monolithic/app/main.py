@@ -3,7 +3,8 @@ import logging
 import os
 import uuid
 
-from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, Header
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, File, Request, UploadFile, Depends, HTTPException, Header
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -14,9 +15,11 @@ from app.schemas import (
     ErrorResponse,
     ReportResponseV2,
 )
-from app.dependencies import registry
+from app.services.config_loader import load_insights_config, load_insights_components
 from app.services.report_service import ReportService
 from app.services.upload_service import UploadService
+from app.services.processor_service import ProcessorService
+from app.services.content_service import ContentService
 from app.exceptions import ValidationError, ProcessingError
 
 # Configure logging
@@ -28,46 +31,36 @@ logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
-# Create FastAPI app
-app = FastAPI(
-    title="Insights On-Premise",
-    description="Red Hat Insights archive processing for on-premise deployment",
-    version="1.0.0",
-)
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize application on startup."""
-    logger.info("Starting Insights On-Premise application")
-
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     # Ensure temp upload directory exists
     os.makedirs(settings.temp_upload_dir, exist_ok=True)
     logger.info(f"Temp upload directory: {settings.temp_upload_dir}")
 
     # Initialize database
-    try:
-        init_db()
-        logger.info("Database initialized successfully")
-    except Exception as e:
-        logger.error(f"Database initialization failed: {e}")
-        raise
+    init_db()
+    logger.info("Database initialized successfully")
 
-    # Initialize processor config and components (fails if config missing or packages can't load)
-    try:
-        registry.get_processor_config()
-        logger.info("Processor configuration loaded successfully")
-    except Exception as e:
-        logger.error(f"Failed to load processor configuration: {e}", exc_info=True)
-        raise
+    # Initialize processor config and components
+    config = load_insights_config()
+    load_insights_components(config)
 
-    # Initialize content service (loads YAML/markdown files into memory, like content-service)
-    try:
-        registry.get_content_service()
-        logger.info("Content service initialized successfully")
-    except Exception as e:
-        logger.error(f"Failed to initialize content service: {e}", exc_info=True)
-        raise
+    app.state.processor_service = ProcessorService(config)
+    app.state.upload_service = UploadService(app.state.processor_service, settings)
+    app.state.content_service = ContentService()
+    app.state.report_service = ReportService(app.state.content_service)
+    logger.info("All services initialized successfully")
+
+    yield
+
+
+# Create FastAPI app
+app = FastAPI(
+    title="Insights On-Premise",
+    description="Red Hat Insights archive processing for on-premise deployment",
+    version="1.0.0",
+    lifespan=lifespan
+)
 
 
 @app.get("/")
@@ -97,10 +90,10 @@ async def health_check():
     },
 )
 async def upload_archive(
+    request: Request,
     file: UploadFile = File(...),
     x_rh_insights_request_id: str = Header(None, alias="x-rh-insights-request-id"),
     db: Session = Depends(get_db),
-    upload_service: UploadService = Depends(registry.get_upload_service),
 ):
     """
     Upload and process Red Hat Insights archive.
@@ -108,10 +101,11 @@ async def upload_archive(
     :param file: Uploaded archive file (tar, tar.gz, or tgz format)
     :param x_rh_insights_request_id: Optional request ID header
     :param db: Database session
-    :param upload_service: Upload service instance
     :return: UploadResponse with processing results
     :raises HTTPException: On validation or processing errors
     """
+    upload_service: UploadService = request.app.state.upload_service
+
     # Generate or use provided request ID
     request_id = x_rh_insights_request_id or str(uuid.uuid4())
 
@@ -151,9 +145,9 @@ async def upload_archive(
     },
 )
 async def get_cluster_report_v2(
+    request: Request,
     cluster_id: str,
     db: Session = Depends(get_db),
-    report_service: ReportService = Depends(registry.get_report_service),
 ):
     """
     Retrieve the latest report for a specific cluster (v2 endpoint).
@@ -163,10 +157,11 @@ async def get_cluster_report_v2(
 
     :param cluster_id: Cluster UUID
     :param db: Database session
-    :param report_service: Report service instance
     :return: ReportResponseV2 with detailed report data
     :raises HTTPException: On not found or processing errors
     """
+    report_service: ReportService = request.app.state.report_service
+
     try:
         report_v2 = report_service.get_cluster_report_v2(db, cluster_id)
         return ReportResponseV2(
