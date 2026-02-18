@@ -10,12 +10,12 @@ from app.exceptions import ProcessingError
 
 
 @pytest.fixture
-def processor_service():
+def processor_service(tmp_path):
     """Create processor service instance with test config."""
     config = {
         "service": {
             "extract_timeout": 300,
-            "extract_tmp_dir": "/tmp/test",
+            "extract_tmp_dir": str(tmp_path),
             "format": "insights.formats._json.JsonFormat",
             "target_components": [],
             "unpacked_archive_size_limit": -1,
@@ -24,20 +24,12 @@ def processor_service():
     return ProcessorService(config)
 
 
-@pytest.fixture
-def mock_extraction_context():
-    """Create mock extraction context."""
-    mock_ctx = MagicMock()
-    mock_ctx.tmp_dir = "/tmp/test/archive"
-    return mock_ctx
-
-
-def test_init_with_valid_config():
+def test_init_with_valid_config(tmp_path):
     """Test initialization with valid config."""
     config = {
         "service": {
             "extract_timeout": 300,
-            "extract_tmp_dir": "/tmp/test",
+            "extract_tmp_dir": str(tmp_path),
             "format": "insights.formats.text.HumanReadableFormat",
             "target_components": [],
             "unpacked_archive_size_limit": -1,
@@ -46,16 +38,16 @@ def test_init_with_valid_config():
     service = ProcessorService(config)
 
     assert service.extract_timeout == 300
-    assert service.extract_tmp_dir == "/tmp/test"
+    assert service.extract_tmp_dir == str(tmp_path)
     assert service.unpacked_archive_size_limit == -1
 
 
-def test_init_with_custom_components():
+def test_init_with_custom_components(tmp_path):
     """Test initialization with custom target components."""
     config = {
         "service": {
             "extract_timeout": 300,
-            "extract_tmp_dir": "/tmp/test",
+            "extract_tmp_dir": str(tmp_path),
             "format": "insights.formats.text.HumanReadableFormat",
             "target_components": ["component1", "component2"],
             "unpacked_archive_size_limit": 1000000,
@@ -82,7 +74,7 @@ def test_validate_size_within_limit(tmp_path):
     config = {
         "service": {
             "extract_timeout": 300,
-            "extract_tmp_dir": "/tmp/test",
+            "extract_tmp_dir": str(tmp_path),
             "format": "insights.formats._json.JsonFormat",
             "target_components": [],
             "unpacked_archive_size_limit": 1000000,  # 1MB
@@ -104,7 +96,7 @@ def test_validate_size_exceeds_limit(mock_path, tmp_path):
     config = {
         "service": {
             "extract_timeout": 300,
-            "extract_tmp_dir": "/tmp/test",
+            "extract_tmp_dir": str(tmp_path),
             "format": "insights.formats._json.JsonFormat",
             "target_components": [],
             "unpacked_archive_size_limit": 100,  # 100 bytes
@@ -361,7 +353,7 @@ def test_process_archive_size_limit_exceeded(mock_extract, tmp_path):
     config = {
         "service": {
             "extract_timeout": 300,
-            "extract_tmp_dir": "/tmp/test",
+            "extract_tmp_dir": str(tmp_path),
             "format": "insights.formats._json.JsonFormat",
             "target_components": [],
             "unpacked_archive_size_limit": 100,  # Very small limit
