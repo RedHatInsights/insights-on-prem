@@ -4,6 +4,7 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime
 
+from app.config import AppConfig
 from app.services.processor_service import ProcessorService
 from app.models import Report, RuleHit
 from app.exceptions import ProcessingError
@@ -12,15 +13,13 @@ from app.exceptions import ProcessingError
 @pytest.fixture
 def service_config(tmp_path):
     """Default processor service config using tmp_path."""
-    return {
-        "service": {
-            "extract_timeout": 300,
-            "extract_tmp_dir": str(tmp_path),
-            "format": "insights.formats._json.JsonFormat",
-            "target_components": [],
-            "unpacked_archive_size_limit": -1,
-        }
-    }
+    return AppConfig(
+        extract_timeout=300,
+        temp_upload_dir=str(tmp_path),
+        format="insights.formats._json.JsonFormat",
+        target_components=[],
+        unpacked_archive_size_limit=-1,
+    )
 
 
 @pytest.fixture
@@ -34,14 +33,14 @@ def test_init_with_valid_config(service_config, tmp_path):
     service = ProcessorService(service_config)
 
     assert service.extract_timeout == 300
-    assert service.extract_tmp_dir == str(tmp_path)
+    assert service.extract_tmp_dir == str(tmp_path)  # sourced from config.temp_upload_dir
     assert service.unpacked_archive_size_limit == -1
 
 
 def test_init_with_custom_components(service_config):
     """Test initialization with custom target components."""
-    service_config["service"]["target_components"] = ["component1", "component2"]
-    service_config["service"]["unpacked_archive_size_limit"] = 1000000
+    service_config.target_components = ["component1", "component2"]
+    service_config.unpacked_archive_size_limit = 1000000
 
     service = ProcessorService(service_config)
 
@@ -281,7 +280,7 @@ def test_process_archive_extraction_fails(mock_extract, processor_service, datab
 @patch('app.services.processor_service.extract')
 def test_process_archive_size_limit_exceeded(mock_extract, service_config, tmp_path):
     """Test archive processing when size limit is exceeded."""
-    service_config["service"]["unpacked_archive_size_limit"] = 100
+    service_config.unpacked_archive_size_limit = 100
     service = ProcessorService(service_config)
 
     mock_extraction = MagicMock()

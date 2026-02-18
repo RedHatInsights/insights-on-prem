@@ -14,12 +14,11 @@ from insights.core.archives import extract
 from insights.core.hydration import initialize_broker
 from insights.formats.text import HumanReadableFormat
 
-from app.config import get_settings
+from app.config import AppConfig
 from app.models import Report, RuleHit
 from app.exceptions import ProcessingError
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 
 class ProcessorService:
@@ -28,23 +27,20 @@ class ProcessorService:
     Refactored from ArchiveProcessor to use dependency injection.
     """
 
-    def __init__(self, config: Dict):
+    def __init__(self, config: AppConfig):
         """
         Initialize the processor service.
 
-        :param config: Insights-core configuration dictionary
+        :param config: Application configuration
         """
         self.config = config
-        self.service_config = self.config.get("service", {})
 
         # Setup formatter
-        formatter_name = self.service_config.get("format", "insights.formats._json.JsonFormat")
-        self.Formatter = dr.get_component(formatter_name) or HumanReadableFormat
+        self.Formatter = dr.get_component(config.format) or HumanReadableFormat
 
         # Setup target components
-        target_components = self.service_config.get("target_components", [])
-        if target_components:
-            self.components_dict = self._get_component_graphs(target_components)
+        if config.target_components:
+            self.components_dict = self._get_component_graphs(config.target_components)
         else:
             # Use all single-node components if none specified
             self.components_dict = dr.determine_components(
@@ -54,13 +50,9 @@ class ProcessorService:
         self.target_components = dr.toposort_flatten(self.components_dict, sort=False)
 
         # Extraction settings
-        self.extract_timeout = self.service_config.get("extract_timeout", 300)
-        self.extract_tmp_dir = self.service_config.get(
-            "extract_tmp_dir", settings.temp_upload_dir
-        )
-        self.unpacked_archive_size_limit = self.service_config.get(
-            "unpacked_archive_size_limit", -1
-        )
+        self.extract_timeout = config.extract_timeout
+        self.extract_tmp_dir = config.temp_upload_dir
+        self.unpacked_archive_size_limit = config.unpacked_archive_size_limit
 
         logger.debug(
             f"Processor initialized with {len(self.target_components)} components"

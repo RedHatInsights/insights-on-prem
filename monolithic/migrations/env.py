@@ -8,7 +8,7 @@ from alembic import context
 
 # Import the Base from models to enable autogenerate
 from app.database import Base
-from app.config import get_settings
+from app.config_loader import load_config
 
 # Import all models to ensure they're registered with Base
 from app.models import Report, RuleHit
@@ -18,8 +18,8 @@ from app.models import Report, RuleHit
 config = context.config
 
 # Get database URL from settings
-settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.database_url)
+app_config = load_config()
+config.set_main_option("sqlalchemy.url", app_config.database_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

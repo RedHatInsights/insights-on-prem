@@ -1,60 +1,56 @@
-"""
-Application configuration management.
-
-This module provides configuration settings loaded from environment variables
-using Pydantic settings management.
-"""
-from functools import lru_cache
-from pydantic_settings import BaseSettings, SettingsConfigDict
+"""Application configuration."""
+import os
+from dataclasses import dataclass, field
+from typing import List
 
 
-class Settings(BaseSettings):
-    """
-    Application settings loaded from environment variables.
+@dataclass
+class AppConfig:
+    """Application configuration.
 
-    Database credentials are loaded from POSTGRES_* environment variables
-    which can be populated from Kubernetes secrets.
+    Values are loaded from config.yml, with environment variables
+    overriding the app section settings.
     """
 
-    # Database settings (loaded from POSTGRES_* env vars)
     postgres_host: str = "localhost"
     postgres_port: int = 5432
     postgres_db: str = "insights"
     postgres_user: str = "insights"
     postgres_password: str = "insights"
-
-    # Application settings
-    max_file_size: int = 104857600  # 100MB in bytes
+    max_file_size: int = 104857600
     temp_upload_dir: str = "/tmp/insights-uploads"
-    log_level: str = "INFO"
+    extract_timeout: int = 300
+    format: str = "insights.formats._json.JsonFormat"
+    target_components: List[str] = field(default_factory=list)
+    unpacked_archive_size_limit: int = -1
 
-    # API settings
-    api_prefix: str = "/api/ingress/v1"
-
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False
-    )
+    plugin_packages: List[str] = field(default_factory=list)
+    plugin_configs: List[dict] = field(default_factory=list)
 
     @property
     def database_url(self) -> str:
-        """
-        Construct database URL from components.
-
-        :return: PostgreSQL connection URL
-        """
+        """Construct PostgreSQL connection URL from components."""
         return (
             f"postgresql://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
 
 
-@lru_cache()
-def get_settings() -> Settings:
-    """
-    Get cached settings instance.
+# Environment variable names mapped to (field_name, type)
+_ENV_OVERRIDES = {
+    "POSTGRES_HOST": ("postgres_host", str),
+    "POSTGRES_PORT": ("postgres_port", int),
+    "POSTGRES_DB": ("postgres_db", str),
+    "POSTGRES_USER": ("postgres_user", str),
+    "POSTGRES_PASSWORD": ("postgres_password", str),
+    "MAX_FILE_SIZE": ("max_file_size", int),
+    "TEMP_UPLOAD_DIR": ("temp_upload_dir", str),
+}
 
-    :return: Cached Settings singleton instance
-    """
-    return Settings()
+
+def apply_env_overrides(config: AppConfig) -> None:
+    """Override AppConfig fields with values from environment variables."""
+    for env_var, (attr, type_fn) in _ENV_OVERRIDES.items():
+        val = os.environ.get(env_var)
+        if val is not None:
+            setattr(config, attr, type_fn(val))

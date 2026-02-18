@@ -8,14 +8,13 @@ from fastapi import FastAPI, File, Request, UploadFile, Depends, HTTPException, 
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from app.config import get_settings
+from app.config_loader import load_config, load_insights_components
 from app.database import init_db, get_db
 from app.schemas import (
     UploadResponse,
     ErrorResponse,
     ReportResponseV2,
 )
-from app.config_loader import load_insights_config, load_insights_components
 from app.content_parser_yaml import YAMLContentParser
 from app.services.report_service import ReportService
 from app.services.upload_service import UploadService
@@ -23,31 +22,28 @@ from app.services.processor_service import ProcessorService
 from app.services.content_service import ContentService
 from app.exceptions import ValidationError, ProcessingError
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
 logger = logging.getLogger(__name__)
 
-settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    config = load_config()
+
     # Ensure temp upload directory exists
-    os.makedirs(settings.temp_upload_dir, exist_ok=True)
-    logger.info(f"Temp upload directory: {settings.temp_upload_dir}")
+    os.makedirs(config.temp_upload_dir, exist_ok=True)
+    logger.info(f"Temp upload directory: {config.temp_upload_dir}")
 
     # Initialize database
-    init_db()
+    engine, session_factory = init_db(config.database_url)
+    app.state.engine = engine
+    app.state.session_factory = session_factory
     logger.info("Database initialized successfully")
 
     # Initialize processor config and components
-    config = load_insights_config()
     load_insights_components(config)
 
     app.state.processor_service = ProcessorService(config)
-    app.state.upload_service = UploadService(app.state.processor_service, settings)
+    app.state.upload_service = UploadService(app.state.processor_service, config)
     app.state.content_service = ContentService(YAMLContentParser())
     app.state.report_service = ReportService(app.state.content_service)
     logger.info("All services initialized successfully")
@@ -81,7 +77,7 @@ async def health_check():
 
 
 @app.post(
-    f"{settings.api_prefix}/upload",
+    "/api/ingress/v1/upload",
     response_model=UploadResponse,
     status_code=202,
     responses={
@@ -213,5 +209,4 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=8000,
         reload=True,
-        log_level=settings.log_level.lower(),
     )

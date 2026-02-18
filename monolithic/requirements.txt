@@ -19,8 +19,6 @@ ccx-rules-processing>=0.0.3
 
 # Configuration and utilities
 pydantic>=2.5.0
-pydantic-settings>=2.0.0
-python-dotenv>=1.0.0
 pyyaml>=6.0.0
 
 # Testing

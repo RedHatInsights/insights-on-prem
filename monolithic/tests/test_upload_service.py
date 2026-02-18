@@ -6,7 +6,7 @@ from unittest.mock import Mock, AsyncMock
 
 import pytest
 
-from app.config import Settings
+from app.config import AppConfig
 from app.exceptions import ValidationError
 from app.schemas import UploadResponse
 from app.services.upload_service import UploadService
@@ -21,20 +21,20 @@ def mock_processor_service():
 
 
 @pytest.fixture
-def test_settings():
-    """Create test settings."""
-    settings = Mock(spec=Settings)
-    settings.max_file_size = 100 * 1024 * 1024  # 100MB
-    settings.temp_upload_dir = tempfile.gettempdir()
-    return settings
+def test_config():
+    """Create test configuration."""
+    return AppConfig(
+        max_file_size=100 * 1024 * 1024,  # 100MB
+        temp_upload_dir=tempfile.gettempdir(),
+    )
 
 
 @pytest.fixture
-def upload_service(mock_processor_service, test_settings):
+def upload_service(mock_processor_service, test_config):
     """Create UploadService instance with mocks."""
     return UploadService(
         processor_service=mock_processor_service,
-        settings=test_settings
+        config=test_config,
     )
 
 
@@ -139,10 +139,10 @@ async def test_save_to_temp_success_tgz(upload_service):
 
 
 @pytest.mark.asyncio
-async def test_save_to_temp_file_too_large(upload_service, test_settings):
+async def test_save_to_temp_file_too_large(upload_service, test_config):
     """Test that files exceeding max size are rejected."""
     # Set small max size
-    test_settings.max_file_size = 100
+    test_config.max_file_size = 100
 
     large_chunk = b"x" * 150
     mock_file = Mock()

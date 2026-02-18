@@ -1,16 +1,14 @@
 # Insights On-Premise Configuration
 
-plugins:
-  packages:
-    - ccx_rules_ocp.external
-    - ccx_rules_processing
-  configs:
-    - name: ccx_ocp_core.config.telemeter.TelemeterServiceConfig
-      enabled: false
-
 service:
+  postgres_host: localhost
+  postgres_port: 5432
+  postgres_db: insights
+  postgres_user: insights
+  postgres_password: insights
+  max_file_size: 104857600  # 100MB in bytes
+  temp_upload_dir: /tmp/insights-uploads
   extract_timeout: 300
-  extract_tmp_dir: /tmp/insights-uploads
   format: ccx_ocp_core.core.formats.json.OCPRecommendationsJsonFormat
 
   # Target components to run (empty list means run all single-node components)
@@ -19,6 +17,14 @@ service:
 
   # Maximum unpacked archive size (-1 for unlimited)
   unpacked_archive_size_limit: -1
+
+plugins:
+  packages:
+    - ccx_rules_ocp.external
+    - ccx_rules_processing
+  configs:
+    - name: ccx_ocp_core.config.telemeter.TelemeterServiceConfig
+      enabled: false
 
 # Logging configuration
 logging:
@@ -44,5 +50,7 @@ logging:
       level: WARNING
     insights.core.dr:
       level: ERROR
+    sqlalchemy.engine:
+      level: DEBUG
     app:
       level: DEBUG

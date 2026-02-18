@@ -1,12 +1,26 @@
 """Tests for upload endpoint."""
+import tempfile
 from io import BytesIO
+from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.config import AppConfig
 from app.main import app
+from app.services.upload_service import UploadService
 
 client = TestClient(app)
+
+
+@pytest.fixture
+def upload_service(database):
+    """Set up a real UploadService for integration tests."""
+    config = AppConfig(temp_upload_dir=tempfile.gettempdir())
+    app.state.upload_service = UploadService(
+        processor_service=Mock(),
+        config=config,
+    )
 
 
 def test_health_endpoint():
@@ -25,7 +39,7 @@ def test_root_endpoint():
     assert data["status"] == "running"
 
 
-def test_upload_invalid_file_format():
+def test_upload_invalid_file_format(upload_service):
     """Test upload with invalid file format."""
     files = {"file": ("test.txt", BytesIO(b"test data"), "text/plain")}
 
@@ -35,11 +49,10 @@ def test_upload_invalid_file_format():
     )
 
     assert response.status_code == 400
-    # Custom exception handler puts the message in "error", not "detail"
     assert "tar" in response.json()["error"].lower()
 
 
-def test_upload_no_filename():
+def test_upload_no_filename(upload_service):
     """Test upload without filename."""
     files = {"file": ("", BytesIO(b"test data"), "application/gzip")}
 

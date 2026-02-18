@@ -3,7 +3,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.database import Base, get_db, get_engine, get_session_factory
+from app.database import Base, get_db
 from app.main import app
 
 
@@ -46,8 +46,6 @@ def database(test_engine, test_session_factory):
             pass
 
     app.dependency_overrides[get_db] = override_get_db
-    app.dependency_overrides[get_engine] = lambda: test_engine
-    app.dependency_overrides[get_session_factory] = lambda: test_session_factory
 
     yield session
 

@@ -33,7 +33,6 @@ services:
       POSTGRES_PASSWORD: insights
       MAX_FILE_SIZE: 104857600
       TEMP_UPLOAD_DIR: /tmp/insights-uploads
-      LOG_LEVEL: INFO
     ports:
       - "8000:8000"
     volumes:
