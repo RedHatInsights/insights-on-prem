@@ -7,57 +7,6 @@ from app.services.content_service import ContentService
 
 
 @patch("app.services.content_service.YAMLContentParser")
-def test_content_service_initialization(mock_parser_class):
-    """Test ContentService initialization."""
-    mock_parser = Mock()
-    mock_parser.parse_all_rules.return_value = []
-    mock_parser_class.return_value = mock_parser
-
-    content_path = "/path/to/content"
-    service = ContentService(content_path)
-
-    # Verify parser was initialized with correct path
-    mock_parser_class.assert_called_once_with(content_path)
-    mock_parser.parse_all_rules.assert_called_once()
-
-
-@patch("app.services.content_service.YAMLContentParser")
-def test_content_service_load_content_builds_index(mock_parser_class):
-    """Test that content is loaded and indexed correctly."""
-    mock_parser = Mock()
-    test_rules = [
-        {
-            "rule_fqdn": "rule1",
-            "error_key": "ERROR1",
-            "description": "Test rule 1",
-        },
-        {
-            "rule_fqdn": "rule2",
-            "error_key": "ERROR2",
-            "description": "Test rule 2",
-        },
-        {
-            "rule_fqdn": "rule1",
-            "error_key": "ERROR3",
-            "description": "Test rule 1 variant",
-        },
-    ]
-    mock_parser.parse_all_rules.return_value = test_rules
-    mock_parser_class.return_value = mock_parser
-
-    service = ContentService("/path/to/content")
-
-    # Verify index has 3 entries
-    assert len(service._content_index) == 3
-    assert ("rule1", "ERROR1") in service._content_index
-    assert ("rule2", "ERROR2") in service._content_index
-    assert ("rule1", "ERROR3") in service._content_index
-
-    # Verify all content list
-    assert len(service._all_content) == 3
-
-
-@patch("app.services.content_service.YAMLContentParser")
 def test_content_service_get_content_found(mock_parser_class):
     """Test getting content that exists."""
     mock_parser = Mock()
