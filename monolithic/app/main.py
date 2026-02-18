@@ -16,6 +16,7 @@ from app.schemas import (
     ReportResponseV2,
 )
 from app.config_loader import load_insights_config, load_insights_components
+from app.content_parser_yaml import YAMLContentParser
 from app.services.report_service import ReportService
 from app.services.upload_service import UploadService
 from app.services.processor_service import ProcessorService
@@ -47,7 +48,7 @@ async def lifespan(app: FastAPI):
 
     app.state.processor_service = ProcessorService(config)
     app.state.upload_service = UploadService(app.state.processor_service, settings)
-    app.state.content_service = ContentService()
+    app.state.content_service = ContentService(YAMLContentParser())
     app.state.report_service = ReportService(app.state.content_service)
     logger.info("All services initialized successfully")
 

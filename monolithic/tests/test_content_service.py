@@ -1,13 +1,10 @@
 """Tests for ContentService."""
-from unittest.mock import Mock, patch
-
-import pytest
+from unittest.mock import Mock
 
 from app.services.content_service import ContentService
 
 
-@patch("app.services.content_service.YAMLContentParser")
-def test_content_service_get_content_found(mock_parser_class):
+def test_content_service_get_content_found():
     """Test getting content that exists."""
     mock_parser = Mock()
     test_rule = {
@@ -17,11 +14,9 @@ def test_content_service_get_content_found(mock_parser_class):
         "resolution": "Fix it",
     }
     mock_parser.parse_all_rules.return_value = [test_rule]
-    mock_parser_class.return_value = mock_parser
 
-    service = ContentService("/path/to/content")
+    service = ContentService(mock_parser)
 
-    # Get content
     content = service.get_content("test.rule", "TEST_ERROR")
 
     assert content is not None
@@ -31,25 +26,21 @@ def test_content_service_get_content_found(mock_parser_class):
     assert content["resolution"] == "Fix it"
 
 
-@patch("app.services.content_service.YAMLContentParser")
-def test_content_service_get_content_not_found(mock_parser_class):
+def test_content_service_get_content_not_found():
     """Test getting content that doesn't exist returns None."""
     mock_parser = Mock()
     mock_parser.parse_all_rules.return_value = [
         {"rule_fqdn": "rule1", "error_key": "ERROR1"}
     ]
-    mock_parser_class.return_value = mock_parser
 
-    service = ContentService("/path/to/content")
+    service = ContentService(mock_parser)
 
-    # Try to get non-existent content
     content = service.get_content("nonexistent.rule", "NONEXISTENT_ERROR")
 
     assert content is None
 
 
-@patch("app.services.content_service.YAMLContentParser")
-def test_content_service_get_content_different_error_keys(mock_parser_class):
+def test_content_service_get_content_different_error_keys():
     """Test that different error keys for same rule are distinguished."""
     mock_parser = Mock()
     test_rules = [
@@ -65,27 +56,11 @@ def test_content_service_get_content_different_error_keys(mock_parser_class):
         },
     ]
     mock_parser.parse_all_rules.return_value = test_rules
-    mock_parser_class.return_value = mock_parser
 
-    service = ContentService("/path/to/content")
+    service = ContentService(mock_parser)
 
-    # Get first error
     content1 = service.get_content("test.rule", "ERROR1")
     assert content1["description"] == "First error"
 
-    # Get second error
     content2 = service.get_content("test.rule", "ERROR2")
     assert content2["description"] == "Second error"
-
-
-@patch("app.services.content_service.YAMLContentParser")
-def test_content_service_with_no_path(mock_parser_class):
-    """Test ContentService initialization with no path."""
-    mock_parser = Mock()
-    mock_parser.parse_all_rules.return_value = []
-    mock_parser_class.return_value = mock_parser
-
-    service = ContentService()
-
-    # Verify parser was initialized with None
-    mock_parser_class.assert_called_once_with(None)

@@ -22,13 +22,13 @@ class ContentService:
     it in memory, just like the Go-based content-service does.
     """
 
-    def __init__(self, content_path: str = None):
+    def __init__(self, parser: YAMLContentParser):
         """
         Initialize content service.
 
-        :param content_path: Path to rules-content directory
+        :param parser: Content parser instance
         """
-        self.parser = YAMLContentParser(content_path)
+        self.parser = parser
         self._content_index: Dict[tuple, Dict] = {}
         self._all_content: list = []
         self._load_content()
