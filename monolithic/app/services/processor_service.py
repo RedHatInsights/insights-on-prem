@@ -84,7 +84,7 @@ class ProcessorService:
 
         return graph
 
-    def validate_size(self, extraction_path: str) -> bool:
+    def _validate_size(self, extraction_path: str) -> bool:
         """
         Validate unpacked archive size.
 
@@ -148,7 +148,7 @@ class ProcessorService:
                 extract_dir=self.extract_tmp_dir,
             ) as extraction:
                 # Validate size
-                if not self.validate_size(extraction.tmp_dir):
+                if not self._validate_size(extraction.tmp_dir):
                     raise ProcessingError(
                         f"Archive exceeds size limit: {self.unpacked_archive_size_limit}"
                     )

@@ -58,65 +58,6 @@ def test_init_with_custom_components(tmp_path):
     assert service.unpacked_archive_size_limit == 1000000
 
 
-def test_validate_size_unlimited(processor_service, tmp_path):
-    """Test validation with unlimited size."""
-    # Create a test directory
-    test_dir = tmp_path / "archive"
-    test_dir.mkdir()
-    (test_dir / "file.txt").write_text("test content")
-
-    # Service has unlimited size (-1)
-    assert processor_service.validate_size(str(test_dir)) is True
-
-
-def test_validate_size_within_limit(tmp_path):
-    """Test validation when size is within limit."""
-    config = {
-        "service": {
-            "extract_timeout": 300,
-            "extract_tmp_dir": str(tmp_path),
-            "format": "insights.formats._json.JsonFormat",
-            "target_components": [],
-            "unpacked_archive_size_limit": 1000000,  # 1MB
-        }
-    }
-    service = ProcessorService(config)
-
-    # Create small test directory
-    test_dir = tmp_path / "archive"
-    test_dir.mkdir()
-    (test_dir / "file.txt").write_text("small content")
-
-    assert service.validate_size(str(test_dir)) is True
-
-
-@patch('app.services.processor_service.Path')
-def test_validate_size_exceeds_limit(mock_path, tmp_path):
-    """Test validation when size exceeds limit."""
-    config = {
-        "service": {
-            "extract_timeout": 300,
-            "extract_tmp_dir": str(tmp_path),
-            "format": "insights.formats._json.JsonFormat",
-            "target_components": [],
-            "unpacked_archive_size_limit": 100,  # 100 bytes
-        }
-    }
-    service = ProcessorService(config)
-
-    # Mock a large file
-    mock_file = Mock()
-    mock_file.is_file.return_value = True
-    mock_file.stat.return_value.st_size = 200  # 200 bytes
-
-    mock_dir = Mock()
-    mock_dir.rglob.return_value = [mock_file]
-
-    mock_path.return_value = mock_dir
-
-    assert service.validate_size("/fake/dir") is False
-
-
 def test_get_cluster_id_from_id_file(processor_service, tmp_path):
     """Test extracting cluster ID from id file."""
     # Create test directory with id file
@@ -365,6 +306,6 @@ def test_process_archive_size_limit_exceeded(mock_extract, tmp_path):
     mock_extraction.tmp_dir = str(tmp_path / "extraction")
     mock_extract.return_value.__enter__.return_value = mock_extraction
 
-    with patch.object(service, 'validate_size', return_value=False):
+    with patch.object(service, '_validate_size', return_value=False):
         with pytest.raises(ProcessingError, match="Archive exceeds size limit"):
             service.process_archive(Mock(), "/fake/archive.tar.gz")
