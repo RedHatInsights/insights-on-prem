@@ -62,7 +62,7 @@ class UploadService:
             logger.warning(f"Request {request_id}: Invalid file format: {file.filename}")
             raise ValidationError("File must be a .tar, .tar.gz, or .tgz archive")
 
-    async def save_to_temp(
+    async def _save_to_temp(
         self, file: UploadFile, request_id: str
     ) -> Tuple[str, int]:
         """
@@ -161,7 +161,7 @@ class UploadService:
         self._validate_file(file, request_id)
 
         # Save to temp location
-        temp_file_path, total_size = await self.save_to_temp(file, request_id)
+        temp_file_path, total_size = await self._save_to_temp(file, request_id)
 
         # Schedule processing as background task
         background_tasks.add_task(self._process_in_background, temp_file_path, request_id)
