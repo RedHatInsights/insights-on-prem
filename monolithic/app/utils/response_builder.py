@@ -2,7 +2,7 @@
 from typing import Dict, Optional
 
 from app.schemas import RuleHitDetailedResponse
-from app.utils.content_utils import format_datetime_rfc3339
+from app.utils.content import format_datetime_rfc3339
 
 
 class ResponseBuilder:

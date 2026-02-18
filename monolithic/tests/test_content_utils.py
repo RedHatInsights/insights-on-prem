@@ -3,7 +3,7 @@ from datetime import datetime
 
 import pytest
 
-from app.utils.content_utils import normalize_rule_fqdn, format_datetime_rfc3339
+from app.utils.content import normalize_rule_fqdn, format_datetime_rfc3339
 
 
 @pytest.mark.parametrize("rule_fqdn, expected", [

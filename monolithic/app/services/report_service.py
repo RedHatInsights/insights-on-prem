@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.models import Report, RuleHit
 from app.schemas import ReportV2, ReportMetaV2, RuleHitDetailedResponse
 from app.services.content_service import ContentService
-from app.utils.content_utils import normalize_rule_fqdn, format_datetime_rfc3339
+from app.utils.content import normalize_rule_fqdn, format_datetime_rfc3339
 from app.utils.response_builder import ResponseBuilder
 
 logger = logging.getLogger(__name__)
