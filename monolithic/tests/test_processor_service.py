@@ -10,9 +10,9 @@ from app.exceptions import ProcessingError
 
 
 @pytest.fixture
-def processor_service(tmp_path):
-    """Create processor service instance with test config."""
-    config = {
+def service_config(tmp_path):
+    """Default processor service config using tmp_path."""
+    return {
         "service": {
             "extract_timeout": 300,
             "extract_tmp_dir": str(tmp_path),
@@ -21,39 +21,29 @@ def processor_service(tmp_path):
             "unpacked_archive_size_limit": -1,
         }
     }
-    return ProcessorService(config)
 
 
-def test_init_with_valid_config(tmp_path):
+@pytest.fixture
+def processor_service(service_config):
+    """Create processor service instance with test config."""
+    return ProcessorService(service_config)
+
+
+def test_init_with_valid_config(service_config, tmp_path):
     """Test initialization with valid config."""
-    config = {
-        "service": {
-            "extract_timeout": 300,
-            "extract_tmp_dir": str(tmp_path),
-            "format": "insights.formats.text.HumanReadableFormat",
-            "target_components": [],
-            "unpacked_archive_size_limit": -1,
-        }
-    }
-    service = ProcessorService(config)
+    service = ProcessorService(service_config)
 
     assert service.extract_timeout == 300
     assert service.extract_tmp_dir == str(tmp_path)
     assert service.unpacked_archive_size_limit == -1
 
 
-def test_init_with_custom_components(tmp_path):
+def test_init_with_custom_components(service_config):
     """Test initialization with custom target components."""
-    config = {
-        "service": {
-            "extract_timeout": 300,
-            "extract_tmp_dir": str(tmp_path),
-            "format": "insights.formats.text.HumanReadableFormat",
-            "target_components": ["component1", "component2"],
-            "unpacked_archive_size_limit": 1000000,
-        }
-    }
-    service = ProcessorService(config)
+    service_config["service"]["target_components"] = ["component1", "component2"]
+    service_config["service"]["unpacked_archive_size_limit"] = 1000000
+
+    service = ProcessorService(service_config)
 
     assert service.unpacked_archive_size_limit == 1000000
 
@@ -289,18 +279,10 @@ def test_process_archive_extraction_fails(mock_extract, processor_service, datab
 
 
 @patch('app.services.processor_service.extract')
-def test_process_archive_size_limit_exceeded(mock_extract, tmp_path):
+def test_process_archive_size_limit_exceeded(mock_extract, service_config, tmp_path):
     """Test archive processing when size limit is exceeded."""
-    config = {
-        "service": {
-            "extract_timeout": 300,
-            "extract_tmp_dir": str(tmp_path),
-            "format": "insights.formats._json.JsonFormat",
-            "target_components": [],
-            "unpacked_archive_size_limit": 100,  # Very small limit
-        }
-    }
-    service = ProcessorService(config)
+    service_config["service"]["unpacked_archive_size_limit"] = 100
+    service = ProcessorService(service_config)
 
     mock_extraction = MagicMock()
     mock_extraction.tmp_dir = str(tmp_path / "extraction")
