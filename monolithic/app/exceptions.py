@@ -1,16 +1,21 @@
 """Custom exceptions for the application."""
 
 
-class ValidationError(Exception):
+class AppError(Exception):
+    """Base exception for all application errors."""
+    pass
+
+
+class ValidationError(AppError):
     """Raised when validation fails."""
     pass
 
 
-class ProcessingError(Exception):
+class ProcessingError(AppError):
     """Raised when archive processing fails."""
     pass
 
 
-class NotFoundError(Exception):
+class NotFoundError(AppError):
     """Raised when a resource is not found."""
     pass
