@@ -4,6 +4,9 @@ from typing import Dict, Optional
 from app.schemas import RuleHitDetailedResponse
 from app.utils.content import format_datetime_rfc3339
 
+# Keys from content_data that map directly to RuleHitDetailedResponse fields
+_CONTENT_FIELDS = {"description", "generic", "reason", "resolution", "more_info", "total_risk", "tags"}
+
 
 class ResponseBuilder:
     """Helper class for building API responses."""
@@ -38,8 +41,6 @@ class ResponseBuilder:
         else:
             created_at = format_datetime_rfc3339(hit.updated_at)
 
-        impacted = format_datetime_rfc3339(hit.updated_at)
-
         # Build extra_data by merging insights details
         extra_data = dict(insights_details)
         extra_data["error_key"] = hit.error_key
@@ -48,18 +49,7 @@ class ResponseBuilder:
         return RuleHitDetailedResponse(
             rule_id=hit.rule_fqdn,
             created_at=created_at,
-            description=content_data.get("description", ""),
-            details=content_data.get("generic", ""),
-            reason=content_data.get("reason", ""),
-            resolution=content_data.get("resolution", ""),
-            more_info=content_data.get("more_info", ""),
-            total_risk=content_data.get("total_risk", 1),
-            disabled=False,
-            disable_feedback="",
-            disabled_at="",
-            internal=False,
-            user_vote=0,
             extra_data=extra_data,
-            tags=content_data.get("tags", []),
-            impacted=impacted,
+            impacted=format_datetime_rfc3339(hit.updated_at),
+            **{k: v for k, v in content_data.items() if k in _CONTENT_FIELDS},
         )
