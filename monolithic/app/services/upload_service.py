@@ -46,7 +46,7 @@ class UploadService:
             suffix = '.tar'
         return suffix
 
-    def validate_file(self, file: UploadFile, request_id: str) -> None:
+    def _validate_file(self, file: UploadFile, request_id: str) -> None:
         """
         Validate uploaded file.
 
@@ -158,7 +158,7 @@ class UploadService:
         logger.info(f"Upload request {request_id}")
 
         # Validate file
-        self.validate_file(file, request_id)
+        self._validate_file(file, request_id)
 
         # Save to temp location
         temp_file_path, total_size = await self.save_to_temp(file, request_id)

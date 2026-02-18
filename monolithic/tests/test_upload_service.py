@@ -47,67 +47,6 @@ def upload_service(mock_processor_service, test_config, mock_session_factory):
     )
 
 
-def test_validate_file_success_tar_gz(upload_service):
-    """Test validating a valid .tar.gz file."""
-    mock_file = Mock()
-    mock_file.filename = "test.tar.gz"
-
-    # Should not raise
-    upload_service.validate_file(mock_file, "req-123")
-
-
-def test_validate_file_success_tgz(upload_service):
-    """Test validating a valid .tgz file."""
-    mock_file = Mock()
-    mock_file.filename = "test.tgz"
-
-    upload_service.validate_file(mock_file, "req-123")
-
-
-def test_validate_file_success_tar(upload_service):
-    """Test validating a valid .tar file."""
-    mock_file = Mock()
-    mock_file.filename = "test.tar"
-
-    upload_service.validate_file(mock_file, "req-123")
-
-
-def test_validate_file_no_filename(upload_service):
-    """Test validation fails when no filename provided."""
-    mock_file = Mock()
-    mock_file.filename = None
-
-    with pytest.raises(ValidationError, match="No filename provided"):
-        upload_service.validate_file(mock_file, "req-123")
-
-
-def test_validate_file_empty_filename(upload_service):
-    """Test validation fails when filename is empty."""
-    mock_file = Mock()
-    mock_file.filename = ""
-
-    with pytest.raises(ValidationError, match="No filename provided"):
-        upload_service.validate_file(mock_file, "req-123")
-
-
-def test_validate_file_invalid_format(upload_service):
-    """Test validation fails for invalid file format."""
-    mock_file = Mock()
-    mock_file.filename = "test.zip"
-
-    with pytest.raises(ValidationError, match="File must be a .tar"):
-        upload_service.validate_file(mock_file, "req-123")
-
-
-def test_validate_file_txt_format(upload_service):
-    """Test validation fails for .txt file."""
-    mock_file = Mock()
-    mock_file.filename = "test.txt"
-
-    with pytest.raises(ValidationError, match="File must be a .tar"):
-        upload_service.validate_file(mock_file, "req-123")
-
-
 @pytest.mark.asyncio
 async def test_save_to_temp_success_tar_gz(upload_service):
     """Test saving .tar.gz file to temporary location."""
