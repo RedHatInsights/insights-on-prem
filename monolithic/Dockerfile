@@ -32,7 +32,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # Copy application code (changes here won't invalidate pip install layer)
 COPY app ./app
 COPY migrations ./migrations
-COPY config.yml alembic.ini ./
+COPY config.yml ./
 
 # Copy rules content from rules image
 COPY --from=rules /app/content/content /app/content

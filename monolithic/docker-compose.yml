@@ -41,7 +41,6 @@ services:
       - ./migrations:/app/migrations
       - ./tests:/app/tests
       - ./config.yml:/app/config.yml
-      - ./alembic.ini:/app/alembic.ini
       - temp_uploads:/tmp/insights-uploads
     depends_on:
       postgres:
