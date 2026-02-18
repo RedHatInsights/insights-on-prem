@@ -15,8 +15,8 @@ WORKDIR $HOME
 COPY --from=rules /etc/pki/ca-trust/source/anchors/Current-IT-Root-CAs.pem /etc/pki/ca-trust/source/anchors/
 
 # Install system dependencies and create venv in one layer
-RUN microdnf install --nodocs -y sqlite python3.11 python3.11-devel gcc postgresql-devel file tar unzip && \
-    python3.11 -m venv $VENV && \
+RUN microdnf install --nodocs -y sqlite python3.12 python3.12-devel gcc postgresql-devel file tar unzip && \
+    python3.12 -m venv $VENV && \
     update-ca-trust && \
     pip install --no-cache-dir -U pip setuptools wheel && \
     microdnf clean all && \
