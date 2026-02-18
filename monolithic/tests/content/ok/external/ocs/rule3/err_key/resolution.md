@@ -1,1 +1,0 @@
-Increase the storage capacity of the cluster

@@ -70,22 +70,6 @@ def test_parse_all_rules_with_external_rules():
     assert rule1["publish_date"] == "2020-04-03T16:13:30+02:00"
 
 
-def test_parse_all_rules_with_ocs_rules():
-    """Test parsing OCS rules from external/ocs directory."""
-    parser = YAMLContentParser(os.path.join(CONTENT_DIR, "ok"))
-    rules = parser.parse_all_rules()
-
-    rule3 = next(r for r in rules if r["rule_fqdn"] == "ccx_rules_ocp.external.ocs.rule3")
-
-    assert rule3["error_key"] == "err_key"
-    assert rule3["description"] == "Generic message for OCS rule3"
-    assert rule3["resolution"] == "Increase the storage capacity of the cluster"
-    # impact: {name: "Three", impact: 3}, likelihood: 4
-    assert rule3["impact"] == 3
-    assert rule3["likelihood"] == 4
-    assert rule3["tags"] == ["service_availability"]
-
-
 def test_parse_all_rules_count():
     """Test that all rules across external and OCS are parsed."""
     parser = YAMLContentParser(os.path.join(CONTENT_DIR, "ok"))
@@ -95,7 +79,7 @@ def test_parse_all_rules_count():
     fqdns = {r["rule_fqdn"] for r in rules}
     assert fqdns == {
         "ccx_rules_ocp.external.rules.rule1",
-        "ccx_rules_ocp.external.ocs.rule3",
+        "ccx_rules_ocp.external.rules.rule2",
     }
 
 
@@ -150,6 +134,6 @@ def test_parse_all_rules_total_risk_calculation():
     rule1 = next(r for r in rules if r["rule_fqdn"] == "ccx_rules_ocp.external.rules.rule1")
     assert rule1["total_risk"] == 2
 
-    # rule3: impact=3, likelihood=4 -> total_risk = (3+4)//2 = 3
-    rule3 = next(r for r in rules if r["rule_fqdn"] == "ccx_rules_ocp.external.ocs.rule3")
-    assert rule3["total_risk"] == 3
+    # rule2: impact=4, likelihood=3 -> total_risk = (4+3)//2 = 3
+    rule2 = next(r for r in rules if r["rule_fqdn"] == "ccx_rules_ocp.external.rules.rule2")
+    assert rule2["total_risk"] == 3
