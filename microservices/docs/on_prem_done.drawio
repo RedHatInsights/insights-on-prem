@@ -78,7 +78,7 @@
             <mxGeometry height="61" width="72.62" x="639.04" y="582" as="geometry" />
           </mxCell>
         </UserObject>
-        <mxCell id="8Mudrr2gFht6RSvs2BrG-24" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=middle;labelPosition=right;verticalLabelPosition=middle;align=left;fontSize=29;horizontal=1;spacingBottom=0;spacingLeft=0;spacingRight=100;strokeColor=#00E9E9;" value="&lt;font style=&quot;font-size: 19px; color: rgb(0, 0, 0);&quot;&gt;identity-injector&lt;/font&gt;" vertex="1">
+        <mxCell id="8Mudrr2gFht6RSvs2BrG-24" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=middle;labelPosition=right;verticalLabelPosition=middle;align=left;fontSize=29;horizontal=1;spacingBottom=0;spacingLeft=0;spacingRight=100;strokeColor=#00E9E9;" value="&lt;font style=&quot;font-size: 19px; color: rgb(0, 0, 0);&quot;&gt;identity-injector&lt;br&gt;&lt;/font&gt;&lt;font style=&quot;font-size: 12px; color: rgb(0, 0, 0);&quot;&gt;(on-prem 3scale replacement)&lt;/font&gt;" vertex="1">
           <mxGeometry height="961.53" width="10" x="110" y="98.47" as="geometry" />
         </mxCell>
         <mxCell id="lFpBbyD3HLiovjmjeh-6-5" edge="1" parent="1" source="lFpBbyD3HLiovjmjeh-6-6" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;" target="Wq5InzKh79W2wBIpRcLx-20">
@@ -170,7 +170,7 @@
             <mxPoint x="-60" y="706.33" as="targetPoint" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="GBYKNOiivCkHNFEzNHQc-15" parent="1" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=#82b366;fillColor=#d5e8d4;fontSize=18;" value="API v1" vertex="1">
+        <mxCell id="GBYKNOiivCkHNFEzNHQc-15" parent="1" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=#82b366;fillColor=#d5e8d4;fontSize=18;" value="API v2" vertex="1">
           <mxGeometry height="30" width="70" x="180.26" y="692" as="geometry" />
         </mxCell>
         <mxCell id="GBYKNOiivCkHNFEzNHQc-18" edge="1" parent="1" source="GBYKNOiivCkHNFEzNHQc-20" style="edgeStyle=orthogonalEdgeStyle;rounded=1;comic=0;jumpStyle=none;orthogonalLoop=1;jettySize=auto;html=1;shadow=0;labelBackgroundColor=none;fontSize=20;fontStyle=1;fontColor=#000000;fillColor=#dae8fc;strokeColor=#000000;" target="cvLpx6p-RuNz1EM1y9mV-4" value="&lt;div&gt;&lt;br&gt;&lt;/div&gt;">
@@ -379,6 +379,24 @@
             </Array>
             <mxPoint x="120" y="940" as="sourcePoint" />
             <mxPoint x="280.0028000000002" y="940.008" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="InsightsOperatorDownload-1" edge="1" parent="1" source="Wq5InzKh79W2wBIpRcLx-20" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;labelBackgroundColor=none;fontSize=12;fontColor=#000000;fillColor=#ffe6cc;strokeColor=#d79b00;strokeWidth=2;dashed=1;" value="report download" target="8Mudrr2gFht6RSvs2BrG-24">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="240" y="470" />
+              <mxPoint x="115" y="470" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="InsightsOperatorDownload-2" edge="1" parent="1" source="8Mudrr2gFht6RSvs2BrG-24" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;labelBackgroundColor=none;fontSize=12;fontColor=#000000;fillColor=#ffe6cc;strokeColor=#d79b00;strokeWidth=2;dashed=1;" value="" target="8Mudrr2gFht6RSvs2BrG-1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="25" y="470" />
+              <mxPoint x="25" y="290" />
+              <mxPoint x="-75" y="290" />
+            </Array>
+            <mxPoint x="100" y="470" as="sourcePoint" />
           </mxGeometry>
         </mxCell>
       </root>
