@@ -5,14 +5,16 @@ from typing import Optional
 
 def normalize_rule_fqdn(rule_fqdn: str) -> str:
     """
-    Strip .report suffix from rule FQDN for content lookup.
+    Strip the function name suffix from rule FQDN for content lookup.
 
-    :param rule_fqdn: Fully qualified rule name
-    :return: Normalized rule FQDN without .report suffix
+    insights-core's dr.get_name() returns "module.function_name" (e.g.
+    "ccx_rules_ocp.external.rules.some_rule.report"), but the content
+    dictionary is keyed by module name only. This strips the last component.
+
+    :param rule_fqdn: Fully qualified rule name from insights-core
+    :return: Module path without the function name suffix
     """
-    if rule_fqdn.endswith(".report"):
-        return rule_fqdn[:-len(".report")]
-    return rule_fqdn
+    return rule_fqdn.rsplit(".", 1)[0] if "." in rule_fqdn else rule_fqdn
 
 
 def format_datetime_rfc3339(dt: Optional[datetime]) -> Optional[str]:

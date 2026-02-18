@@ -8,9 +8,9 @@ from app.utils.content import normalize_rule_fqdn, format_datetime_rfc3339
 
 @pytest.mark.parametrize("rule_fqdn, expected", [
     ("ccx_rules_ocp.external.rules.some_rule.report", "ccx_rules_ocp.external.rules.some_rule"),
-    ("ccx_rules_ocp.external.rules.some_rule", "ccx_rules_ocp.external.rules.some_rule"),
-    ("", ""),
+    ("ccx_rules_ocp.external.rules.some_rule.check", "ccx_rules_ocp.external.rules.some_rule"),
     ("ccx_rules_ocp.external.report.some_rule.report", "ccx_rules_ocp.external.report.some_rule"),
+    ("", ""),
 ])
 def test_normalize_rule_fqdn(rule_fqdn, expected):
     """Test normalization of rule FQDN."""
