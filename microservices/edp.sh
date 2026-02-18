@@ -70,10 +70,12 @@ configure_insights() {
     oc create secret generic support \
         --from-literal=endpoint="http://identity-injector.edp-processing.svc.cluster.local:8080/api/ingress/v1/upload" \
         --from-literal=insights-url="http://identity-injector.edp-processing.svc.cluster.local:8080/api/v2" \
+        --from-literal=reportEndpoint="http://identity-injector.edp-processing.svc.cluster.local:8080/api/v2/cluster/%s/reports" \
         -n openshift-config
     oc delete pod -n openshift-insights -l app=insights-operator
     oc wait --for=condition=ready pod -l app=insights-operator -n openshift-insights --timeout=60s
-    echo "✓ Endpoint: http://identity-injector.edp-processing.svc.cluster.local:8080/api/ingress/v1/upload"
+    echo "✓ Upload endpoint: http://identity-injector.edp-processing.svc.cluster.local:8080/api/ingress/v1/upload"
+    echo "✓ Download endpoint: http://identity-injector.edp-processing.svc.cluster.local:8080/api/v2/cluster/%s/reports"
     echo "Triggering initial upload..."
     sleep 10
     oc delete pod -n openshift-insights -l app=insights-operator
@@ -154,6 +156,15 @@ verify() {
     P=$(oc logs -n edp-processing deployment/db-writer --since=3h 2>/dev/null | grep -c "processing message" 2>/dev/null || echo 0)
     [ "$U" -gt 0 ] 2>/dev/null && echo "✓ $U uploads" || echo "⚠️  No uploads"
     [ "$P" -gt 0 ] 2>/dev/null && echo "✓ $P processed" || echo "⚠️  No processing"
+
+    echo -e "\n=== Upgrades Services ==="
+    # Check data-eng metrics endpoint
+    DE=$(oc exec -n edp-processing deployment/aggregator -- sh -c 'command -v curl >/dev/null && curl -s http://ccx-upgrades-data-eng:8000/metrics 2>/dev/null | grep -c "ccx_upgrades" || echo 0' 2>/dev/null || echo 0)
+    [ "$DE" -gt 0 ] 2>/dev/null && echo "✓ data-eng responding" || echo "⚠️  data-eng not responding"
+
+    # Check inference metrics endpoint
+    INF=$(oc exec -n edp-processing deployment/aggregator -- sh -c 'command -v curl >/dev/null && curl -s http://ccx-upgrades-inference:8000/metrics 2>/dev/null | grep -c "ccx_upgrades" || echo 0' 2>/dev/null || echo 0)
+    [ "$INF" -gt 0 ] 2>/dev/null && echo "✓ inference responding" || echo "⚠️  inference not responding"
 
     echo -e "\n$([ $FAILED -eq 0 ] && echo '✓ PASSED' || echo '❌ FAILED')"
     return $FAILED

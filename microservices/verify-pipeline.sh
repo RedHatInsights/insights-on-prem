@@ -106,6 +106,31 @@ if oc get deployment insights-client -n open-cluster-management &>/dev/null; the
     fi
 fi
 
+# Check InsightsOperator CR healthChecks (from report download)
+echo -n "Insights-operator report download: "
+if $VERBOSE; then
+    echo
+    echo "  Command: oc get insightsoperator cluster -o jsonpath='{.status.insightsReport}'"
+fi
+INSIGHTS_REPORT=$(oc get insightsoperator cluster -o jsonpath='{.status.insightsReport}' 2>/dev/null || true)
+if [ -n "$INSIGHTS_REPORT" ]; then
+    HEALTH_COUNT=$(echo "$INSIGHTS_REPORT" | grep -o '"description"' | wc -l | tr -d ' ')
+    DOWNLOADED_AT=$(echo "$INSIGHTS_REPORT" | grep -o '"downloadedAt":"[^"]*"' | cut -d'"' -f4)
+    if [ -n "$DOWNLOADED_AT" ]; then
+        echo "✓ (${HEALTH_COUNT} healthChecks at ${DOWNLOADED_AT})"
+        if $VERBOSE; then
+            echo "  Run: oc get insightsoperator cluster -o yaml | grep -A 50 insightsReport"
+            echo
+        fi
+    else
+        echo "⚠️  (not downloaded yet)"
+        $VERBOSE && echo
+    fi
+else
+    echo "⚠️  (no report)"
+    $VERBOSE && echo
+fi
+
 # Measure end-to-end latency from database timestamps
 echo -n "Processing latency: "
 CMD="oc exec -n edp-processing postgresql-0 -- bash -c \"PGPASSWORD=password psql -U user -d aggregator -t -c 'SELECT last_checked_at, reported_at, EXTRACT(EPOCH FROM (reported_at - last_checked_at)) FROM report ORDER BY last_checked_at DESC LIMIT 1;'\""
@@ -129,7 +154,8 @@ else
 fi
 
 echo
-echo "Pipeline: insights-operator → identity-injector → ingress → Kafka → ccx-data-pipeline → db-writer"
+echo "Upload: insights-operator → identity-injector → ingress → Kafka → ccx-data-pipeline → db-writer → PostgreSQL"
+echo "Download: insights-operator ← identity-injector ← smart-proxy ← aggregator ← PostgreSQL/Redis"
 if ! $VERBOSE; then
     echo
     echo "Tip: Run with -v or --verbose for detailed command output"

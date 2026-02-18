@@ -9,7 +9,7 @@ The EDP consists of:
 ### Infrastructure Services
 - **PostgreSQL**: Database for aggregator (notifications service removed)
 - **Kafka**: Message broker for data pipeline communication (Strimzi operator)
-- **Redis**: Cache for aggregator results
+- **Redis**: Cache for smart-proxy results (optional - improves query performance)
 - **MinIO**: S3-compatible storage for uploaded archives
 - **Mock OAuth2 Server**: For development/testing authentication
 - **Identity Injector**: Nginx proxy with three functions:
@@ -45,11 +45,13 @@ The on-prem deployment consists of two main data paths:
 4. ccx-data-pipeline processes the archive and extracts recommendations
 5. Writers store results in PostgreSQL and Redis
 
-**Query Path** (insights-client → identity-injector → smart-proxy → aggregator):
-1. insights-client requests reports from identity-injector
+**Query Path** (OCM UI/insights-client/insights-operator → identity-injector → smart-proxy → aggregator):
+1. Client (OCM UI in production, insights-client/insights-operator on-prem) requests reports from identity-injector
 2. Identity-injector adds x-rh-identity header with org_id=000001 and forwards to smart-proxy
-3. Smart-proxy validates identity and forwards to aggregator
+3. Smart-proxy checks Redis cache, or forwards to aggregator if cache miss
 4. Aggregator queries PostgreSQL and returns results
+5. Smart-proxy caches results in Redis for faster subsequent queries
+6. Results displayed in OCM UI (production) or insights-client PolicyReports / insights-operator CR (on-prem)
 
 **Upgrades/Thanos Path** (ccx-upgrades-data-eng → identity-injector → Thanos → Prometheus):
 1. ccx-upgrades-data-eng queries cluster metrics using RHOBS API format
@@ -333,6 +335,7 @@ type: Opaque
 stringData:
   endpoint: "http://identity-injector.edp-processing.svc.cluster.local:8080/api/ingress/v1/upload"
   insights-url: "http://identity-injector.edp-processing.svc.cluster.local:8080/api/v2"
+  reportEndpoint: "http://identity-injector.edp-processing.svc.cluster.local:8080/api/v2/cluster/%s/reports"
 EOF
 
 # Restart insights-operator to pick up the new configuration
@@ -344,7 +347,8 @@ oc wait --for=condition=ready pod -l app=insights-operator -n openshift-insights
 
 **What these settings do:**
 - `endpoint`: Where insights-operator **uploads** cluster archives (identity-injector → ingress)
-- `insights-url`: Where insights-operator **queries** for reports (identity-injector → smart-proxy)
+- `insights-url`: Base URL for insights-operator API calls
+- `reportEndpoint`: Where insights-operator **downloads** processed recommendations (identity-injector → smart-proxy → aggregator/Redis)
 
 **Verify insights-operator configuration:**
 
@@ -504,6 +508,20 @@ oc logs -n edp-processing deployment/db-writer --since=3h | grep "processing mes
 # "cluster":"00ff20e8-2326-4373-bce0-194ec01a59d1"
 # "issues found":0  <- This is normal for a healthy cluster!
 # "message":"Stored info report"
+
+# 5. Check insights-operator downloaded recommendations
+oc logs -n openshift-insights deployment/insights-operator --since=3h | grep "Report retrieved"
+
+# 6. Verify InsightsOperator CR was updated with healthChecks
+oc get insightsoperator cluster -o yaml | grep -A 20 "insightsReport:"
+
+# Expected output:
+#   insightsReport:
+#     downloadedAt: "2026-02-17T15:01:35Z"
+#     healthChecks:
+#     - description: "..."
+#       totalRisk: 1
+#       state: Enabled
 ```
 
 ### Query Results from Smart Proxy
@@ -521,6 +539,48 @@ curl -sk -H "x-rh-identity: $IDENTITY_HEADER" \
   "https://$SMART_PROXY_URL/api/v1/clusters/$CLUSTER_ID/report" | \
   jq '.report.data[] | {rule_id, description, total_risk, resolution}'
 ```
+
+### Test Upgrades Services
+
+The upgrades services predict upgrade risk using cluster metrics from Thanos/Prometheus.
+
+**Architecture:** Prometheus → Thanos → identity-injector → ccx-upgrades-data-eng → ccx-upgrades-inference
+
+```bash
+# Check services are running
+oc get pods -n edp-processing | grep upgrade
+# Should show:
+#   ccx-upgrades-data-eng-xxx   1/1     Running
+#   ccx-upgrades-inference-xxx  1/1     Running
+
+# Check data-eng metrics (requires port-forward)
+oc port-forward -n edp-processing deployment/ccx-upgrades-data-eng 8001:8000 &
+sleep 2
+curl -s http://localhost:8001/metrics | grep -E "ccx_upgrades.*total"
+kill %1
+
+# Check inference metrics (requires port-forward)
+oc port-forward -n edp-processing deployment/ccx-upgrades-inference 8002:8000 &
+sleep 2
+curl -s http://localhost:8002/metrics | grep -E "ccx_upgrades.*total"
+kill %1
+
+# View service logs
+oc logs -n edp-processing deployment/ccx-upgrades-data-eng --tail=20
+oc logs -n edp-processing deployment/ccx-upgrades-inference --tail=20
+
+# Test upgrade risk prediction via smart-proxy
+CLUSTER_ID=$(oc get clusterversion -o jsonpath='{.items[0].spec.clusterID}')
+curl -sk -H "x-rh-identity: $IDENTITY_HEADER" \
+  -H "Content-Type: application/json" \
+  -d "{\"cluster_id\": \"$CLUSTER_ID\"}" \
+  "https://$SMART_PROXY_URL/api/v1/upgrade-risks-prediction" | jq '.'
+```
+
+**Note:** Upgrade risk prediction requires:
+- ACM Observability (Thanos) to be installed
+- Cluster metrics available in Prometheus
+- Both ccx-upgrades-data-eng and ccx-upgrades-inference running
 
 ## Configuration
 
