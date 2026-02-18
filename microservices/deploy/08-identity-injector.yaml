@@ -79,6 +79,23 @@ data:
             return ""
           }
 
+          # Rewrite query parameter: _id -> managed_cluster for on-prem Thanos
+          # Production RHOBS uses _id, on-prem Thanos uses managed_cluster
+          set_by_lua_block $rewritten_args {
+            local args = ngx.var.args
+            if args then
+              -- Replace _id= with managed_cluster= in query parameter
+              args = string.gsub(args, "_id=", "managed_cluster=")
+              args = string.gsub(args, "_id~", "managed_cluster~")
+              args = string.gsub(args, "_id:", "managed_cluster:")
+              -- URL decode and re-encode to handle %7B_id (URL-encoded {_id)
+              args = string.gsub(args, "%%7B_id", "%%7Bmanaged_cluster")
+              args = string.gsub(args, "%%7b_id", "%%7bmanaged_cluster")
+              args = string.gsub(args, "{_id", "{managed_cluster")
+            end
+            return args
+          }
+
           # Add Authorization header with ServiceAccount token
           proxy_set_header Authorization "Bearer $token";
 
@@ -87,8 +104,8 @@ data:
           proxy_set_header X-Real-IP $remote_addr;
           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 
-          # Forward to Thanos with path translation
-          proxy_pass https://thanos/api/v1/$1$is_args$args;
+          # Forward to Thanos with path translation and rewritten query args
+          proxy_pass https://thanos/api/v1/$1?$rewritten_args;
           proxy_ssl_verify off;
 
           # Timeouts
@@ -144,6 +161,7 @@ spec:
       labels:
         app: identity-injector
     spec:
+      serviceAccountName: upgrades-sa
       containers:
         - name: nginx
           image: docker.io/openresty/openresty:1.25.3.1-alpine

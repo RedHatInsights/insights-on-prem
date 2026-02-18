@@ -153,9 +153,29 @@ else
     $VERBOSE && echo
 fi
 
+# Check upgrades service Thanos integration
+echo -n "Upgrades Thanos query: "
+CMD="oc exec -n edp-processing deployment/ccx-upgrades-data-eng -- python3 -c \"import requests; r = requests.get('http://identity-injector.edp-processing.svc.cluster.local:8080/api/metrics/v1/telemeter/api/v1/query', params={'query': 'cluster_version'}, headers={'Authorization': 'Bearer fake'}, verify=False); results = r.json().get('data', {}).get('result', []); print(len(results)) if results else print('0')\" 2>/dev/null"
+if $VERBOSE; then
+    echo
+    echo "  Command: $CMD"
+fi
+THANOS_RESULTS=$(eval "$CMD" || echo "0")
+if [ "$THANOS_RESULTS" -gt 0 ] 2>/dev/null; then
+    echo "✓ ($THANOS_RESULTS results)"
+    if $VERBOSE; then
+        echo "  OAuth → identity-injector → ServiceAccount → Thanos flow verified"
+        echo
+    fi
+else
+    echo "⚠️  (no connection to Thanos)"
+    $VERBOSE && echo
+fi
+
 echo
 echo "Upload: insights-operator → identity-injector → ingress → Kafka → ccx-data-pipeline → db-writer → PostgreSQL"
 echo "Download: insights-operator ← identity-injector ← smart-proxy ← aggregator ← PostgreSQL/Redis"
+echo "Upgrades: ccx-upgrades-data-eng → identity-injector → Thanos (OpenShift monitoring)"
 if ! $VERBOSE; then
     echo
     echo "Tip: Run with -v or --verbose for detailed command output"
