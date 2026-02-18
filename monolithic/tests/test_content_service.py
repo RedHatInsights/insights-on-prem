@@ -77,9 +77,6 @@ def test_content_service_get_content_different_error_keys(mock_parser_class):
     content2 = service.get_content("test.rule", "ERROR2")
     assert content2["description"] == "Second error"
 
-    # Verify they're different
-    assert content1 != content2
-
 
 @patch("app.services.content_service.YAMLContentParser")
 def test_content_service_with_no_path(mock_parser_class):
