@@ -4,7 +4,7 @@ import os
 import uuid
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, File, Request, UploadFile, Depends, HTTPException, Header
+from fastapi import BackgroundTasks, FastAPI, File, Request, UploadFile, Depends, HTTPException, Header
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -20,7 +20,7 @@ from app.services.report_service import ReportService
 from app.services.upload_service import UploadService
 from app.services.processor_service import ProcessorService
 from app.services.content_service import ContentService
-from app.exceptions import ValidationError, ProcessingError
+from app.exceptions import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ async def lifespan(app: FastAPI):
     load_insights_components(config)
 
     app.state.processor_service = ProcessorService(config)
-    app.state.upload_service = UploadService(app.state.processor_service, config)
+    app.state.upload_service = UploadService(app.state.processor_service, config, session_factory)
     app.state.content_service = ContentService(YAMLContentParser())
     app.state.report_service = ReportService(app.state.content_service)
     logger.info("All services initialized successfully")
@@ -88,18 +88,18 @@ async def health_check():
 )
 async def upload_archive(
     request: Request,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     x_rh_insights_request_id: str = Header(None, alias="x-rh-insights-request-id"),
-    db: Session = Depends(get_db),
 ):
     """
     Upload and process Red Hat Insights archive.
 
     :param file: Uploaded archive file (tar, tar.gz, or tgz format)
+    :param background_tasks: FastAPI background tasks
     :param x_rh_insights_request_id: Optional request ID header
-    :param db: Database session
-    :return: UploadResponse with processing results
-    :raises HTTPException: On validation or processing errors
+    :return: UploadResponse with accepted status
+    :raises HTTPException: On validation errors
     """
     upload_service: UploadService = request.app.state.upload_service
 
@@ -107,19 +107,12 @@ async def upload_archive(
     request_id = x_rh_insights_request_id or str(uuid.uuid4())
 
     try:
-        return await upload_service.process_upload(db, file, request_id)
+        return await upload_service.process_upload(background_tasks, file, request_id)
 
     except ValidationError as e:
         raise HTTPException(
             status_code=400,
             detail=str(e),
-        )
-
-    except ProcessingError as e:
-        logger.error(f"Request {request_id}: Processing error: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Archive processing failed: {str(e)}",
         )
 
     except Exception as e:

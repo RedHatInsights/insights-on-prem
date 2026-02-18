@@ -9,8 +9,6 @@ class UploadResponse(BaseModel):
 
     request_id: str = Field(..., description="Unique request identifier")
     status: str = Field(..., description="Processing status")
-    cluster_id: str = Field(..., description="Cluster identifier from archive")
-    rules_found: int = Field(..., description="Number of rules violations found")
     uploaded_at: datetime = Field(..., description="Upload timestamp")
 
 

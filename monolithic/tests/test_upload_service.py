@@ -1,10 +1,10 @@
 """Tests for UploadService."""
 import os
 import tempfile
-from io import BytesIO
 from unittest.mock import Mock, AsyncMock
 
 import pytest
+from fastapi import BackgroundTasks
 
 from app.config import AppConfig
 from app.exceptions import ValidationError
@@ -21,6 +21,14 @@ def mock_processor_service():
 
 
 @pytest.fixture
+def mock_session_factory():
+    """Create a mock session factory."""
+    session = Mock()
+    factory = Mock(return_value=session)
+    return factory
+
+
+@pytest.fixture
 def test_config():
     """Create test configuration."""
     return AppConfig(
@@ -30,11 +38,12 @@ def test_config():
 
 
 @pytest.fixture
-def upload_service(mock_processor_service, test_config):
+def upload_service(mock_processor_service, test_config, mock_session_factory):
     """Create UploadService instance with mocks."""
     return UploadService(
         processor_service=mock_processor_service,
         config=test_config,
+        session_factory=mock_session_factory,
     )
 
 
@@ -176,27 +185,38 @@ async def test_save_to_temp_chunks(upload_service):
 
 
 @pytest.mark.asyncio
-async def test_process_upload_success(upload_service, mock_processor_service):
-    """Test successful upload processing."""
+async def test_process_upload_success(upload_service):
+    """Test successful upload scheduling."""
     test_data = b"test archive"
     mock_file = Mock()
     mock_file.filename = "test.tar.gz"
     mock_file.read = AsyncMock(side_effect=[test_data, b""])
 
-    mock_db = Mock()
-    request_id = "req-123"
+    background_tasks = BackgroundTasks()
 
-    result = await upload_service.process_upload(mock_db, mock_file, request_id)
+    result = await upload_service.process_upload(background_tasks, mock_file, "req-123")
 
-    # Verify result
     assert isinstance(result, UploadResponse)
-    assert result.request_id == request_id
-    assert result.status == "processed"
-    assert result.cluster_id == "test-cluster-123"
-    assert result.rules_found == 5
+    assert result.request_id == "req-123"
+    assert result.status == "accepted"
 
-    # Verify processor was called
-    mock_processor_service.process_archive.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_process_upload_schedules_background_task(upload_service):
+    """Test that processing is scheduled as a background task."""
+    test_data = b"test archive"
+    mock_file = Mock()
+    mock_file.filename = "test.tar.gz"
+    mock_file.read = AsyncMock(side_effect=[test_data, b""])
+
+    background_tasks = Mock(spec=BackgroundTasks)
+
+    await upload_service.process_upload(background_tasks, mock_file, "req-123")
+
+    background_tasks.add_task.assert_called_once()
+    args = background_tasks.add_task.call_args
+    assert args[0][0] == upload_service._process_in_background
+    assert args[0][2] == "req-123"
 
 
 @pytest.mark.asyncio
@@ -205,66 +225,35 @@ async def test_process_upload_validation_error(upload_service):
     mock_file = Mock()
     mock_file.filename = "test.zip"  # Invalid format
 
-    mock_db = Mock()
+    background_tasks = BackgroundTasks()
 
     with pytest.raises(ValidationError):
-        await upload_service.process_upload(mock_db, mock_file, "req-123")
+        await upload_service.process_upload(background_tasks, mock_file, "req-123")
 
 
-@pytest.mark.asyncio
-async def test_process_upload_cleanup_on_success(upload_service):
-    """Test that temporary file is cleaned up after successful processing."""
-    test_data = b"test archive"
-    mock_file = Mock()
-    mock_file.filename = "test.tar.gz"
-    mock_file.read = AsyncMock(side_effect=[test_data, b""])
+def test_process_in_background_success(upload_service, mock_processor_service, mock_session_factory):
+    """Test background processing calls processor and cleans up."""
+    # Create a real temp file
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".tar.gz") as f:
+        f.write(b"test data")
+        temp_path = f.name
 
-    mock_db = Mock()
+    upload_service._process_in_background(temp_path, "req-123")
 
-    # Track temp file path
-    temp_path_holder = []
-    original_save = upload_service.save_to_temp
-
-    async def track_temp_path(*args, **kwargs):
-        path, size = await original_save(*args, **kwargs)
-        temp_path_holder.append(path)
-        return path, size
-
-    upload_service.save_to_temp = track_temp_path
-
-    result = await upload_service.process_upload(mock_db, mock_file, "req-123")
-
-    # Verify temp file was deleted
-    assert len(temp_path_holder) == 1
-    assert not os.path.exists(temp_path_holder[0])
+    mock_processor_service.process_archive.assert_called_once()
+    mock_session_factory.return_value.close.assert_called_once()
+    assert not os.path.exists(temp_path)
 
 
-@pytest.mark.asyncio
-async def test_process_upload_cleanup_on_error(upload_service, mock_processor_service):
-    """Test that temporary file is cleaned up even when processing fails."""
-    test_data = b"test archive"
-    mock_file = Mock()
-    mock_file.filename = "test.tar.gz"
-    mock_file.read = AsyncMock(side_effect=[test_data, b""])
-
-    # Make processor raise exception
+def test_process_in_background_cleanup_on_error(upload_service, mock_processor_service, mock_session_factory):
+    """Test background processing cleans up temp file even on failure."""
     mock_processor_service.process_archive.side_effect = Exception("Processing failed")
 
-    mock_db = Mock()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".tar.gz") as f:
+        f.write(b"test data")
+        temp_path = f.name
 
-    temp_path_holder = []
-    original_save = upload_service.save_to_temp
+    upload_service._process_in_background(temp_path, "req-123")
 
-    async def track_temp_path(*args, **kwargs):
-        path, size = await original_save(*args, **kwargs)
-        temp_path_holder.append(path)
-        return path, size
-
-    upload_service.save_to_temp = track_temp_path
-
-    with pytest.raises(Exception, match="Processing failed"):
-        await upload_service.process_upload(mock_db, mock_file, "req-123")
-
-    # Verify temp file was still deleted
-    assert len(temp_path_holder) == 1
-    assert not os.path.exists(temp_path_holder[0])
+    mock_session_factory.return_value.close.assert_called_once()
+    assert not os.path.exists(temp_path)

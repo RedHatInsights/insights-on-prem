@@ -5,8 +5,8 @@ import tempfile
 from datetime import datetime
 from typing import Tuple
 
-from fastapi import UploadFile
-from sqlalchemy.orm import Session
+from fastapi import BackgroundTasks, UploadFile
+from sqlalchemy.orm import sessionmaker
 
 from app.config import AppConfig
 from app.schemas import UploadResponse
@@ -19,15 +19,22 @@ logger = logging.getLogger(__name__)
 class UploadService:
     """Service for handling archive uploads and processing orchestration."""
 
-    def __init__(self, processor_service: ProcessorService, config: AppConfig):
+    def __init__(
+        self,
+        processor_service: ProcessorService,
+        config: AppConfig,
+        session_factory: sessionmaker,
+    ):
         """
         Initialize the upload service.
 
         :param processor_service: Processor service instance
         :param config: Application configuration
+        :param session_factory: SQLAlchemy session factory for background tasks
         """
         self.processor_service = processor_service
         self.config = config
+        self.session_factory = session_factory
 
     def _get_archive_suffix(self, file: UploadFile) -> str:
         suffix = ""
@@ -107,18 +114,46 @@ class UploadService:
 
         return temp_file_path, total_size
 
+    def _process_in_background(self, temp_file_path: str, request_id: str) -> None:
+        """
+        Process archive in a background task.
+
+        :param temp_file_path: Path to temporary archive file
+        :param request_id: Request ID for logging
+        """
+        try:
+            db = self.session_factory()
+            try:
+                cluster_id, rules_count = self.processor_service.process_archive(
+                    db, temp_file_path
+                )
+                logger.info(
+                    f"Request {request_id}: Successfully processed cluster {cluster_id} "
+                    f"with {rules_count} rules"
+                )
+            except Exception as e:
+                logger.error(f"Request {request_id}: Background processing failed: {e}", exc_info=True)
+            finally:
+                db.close()
+        finally:
+            if os.path.exists(temp_file_path):
+                try:
+                    os.remove(temp_file_path)
+                    logger.debug(f"Cleaned up temporary file: {temp_file_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to clean up temporary file: {e}")
+
     async def process_upload(
-        self, db: Session, file: UploadFile, request_id: str
+        self, background_tasks: BackgroundTasks, file: UploadFile, request_id: str
     ) -> UploadResponse:
         """
-        Main upload processing function.
+        Validate and save upload, then schedule processing as a background task.
 
-        :param db: Database session
+        :param background_tasks: FastAPI BackgroundTasks
         :param file: Uploaded file
         :param request_id: Request ID
-        :return: UploadResponse with processing results
+        :return: UploadResponse with accepted status
         :raises ValidationError: On validation errors
-        :raises ProcessingError: On processing errors
         """
         logger.info(f"Upload request {request_id}")
 
@@ -126,33 +161,13 @@ class UploadService:
         self.validate_file(file, request_id)
 
         # Save to temp location
-        temp_file_path = None
-        try:
-            temp_file_path, total_size = await self.save_to_temp(file, request_id)
+        temp_file_path, total_size = await self.save_to_temp(file, request_id)
 
-            # Process archive
-            cluster_id, rules_count = self.processor_service.process_archive(db, temp_file_path)
+        # Schedule processing as background task
+        background_tasks.add_task(self._process_in_background, temp_file_path, request_id)
 
-            # Return success response
-            response = UploadResponse(
-                request_id=request_id,
-                status="processed",
-                cluster_id=cluster_id,
-                rules_found=rules_count,
-                uploaded_at=datetime.utcnow(),
-            )
-
-            logger.info(
-                f"Request {request_id}: Successfully processed cluster {cluster_id} with {rules_count} rules"
-            )
-
-            return response
-
-        finally:
-            # Clean up temporary file
-            if temp_file_path and os.path.exists(temp_file_path):
-                try:
-                    os.remove(temp_file_path)
-                    logger.debug(f"Cleaned up temporary file: {temp_file_path}")
-                except Exception as e:
-                    logger.warning(f"Failed to clean up temporary file: {e}")
+        return UploadResponse(
+            request_id=request_id,
+            status="accepted",
+            uploaded_at=datetime.utcnow(),
+        )

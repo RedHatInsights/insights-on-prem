@@ -5,6 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import sessionmaker
 
 from app.config import AppConfig
 from app.main import app
@@ -14,12 +15,13 @@ client = TestClient(app)
 
 
 @pytest.fixture
-def upload_service(database):
+def upload_service():
     """Set up a real UploadService for integration tests."""
     config = AppConfig(temp_upload_dir=tempfile.gettempdir())
     app.state.upload_service = UploadService(
         processor_service=Mock(),
         config=config,
+        session_factory=Mock(spec=sessionmaker),
     )
 
 
