@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: insights-on-prem
+spec:
+  replicas: 1
+  template:
+    metadata:
+      name: insights-on-prem
+      labels:
+        app: insights-on-prem 
+    spec:
+      containers:
+      - name: insights-on-prem
+        image: quay.io/ccxdev/insights-on-premise-poc:latest
+        ports:
+        - containerPort: 8000
+          name: http
+          protocol: TCP
+        env:
+        - name: POSTGRES_HOST
+          value: "search-postgres.open-cluster-management.svc.cluster.local"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: search-postgres
+              key: database-user
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: search-postgres
+              key: database-password
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              name: search-postgres
+              key: database-name
+      imagePullSecrets:
+      - name: ccxdev-insights-on-prem-poc-pull-secret
+  selector:
+    matchLabels:
+      app: insights-on-prem
