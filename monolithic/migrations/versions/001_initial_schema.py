@@ -38,6 +38,7 @@ def upgrade() -> None:
         sa.Column('rule_fqdn', sa.VARCHAR(), nullable=False),
         sa.Column('error_key', sa.VARCHAR(), nullable=False),
         sa.Column('updated_at', sa.DateTime(), nullable=True),
+        sa.Column('impacted_since', sa.DateTime(), nullable=True),
         sa.PrimaryKeyConstraint('cluster_id', 'rule_fqdn', 'error_key', name='rule_hit_pkey')
     )
 

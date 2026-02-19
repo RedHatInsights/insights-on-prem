@@ -10,13 +10,11 @@ from app.utils.response_builder import ResponseBuilder
 
 def test_build_rule_hit_v2_basic():
     """Test building a basic rule hit response."""
-    # Create mock RuleHit
     hit = Mock()
     hit.rule_fqdn = "ccx_rules_ocp.external.rules.test_rule"
     hit.error_key = "TEST_ERROR"
-    hit.updated_at = datetime(2024, 1, 15, 10, 30, 0)
+    hit.impacted_since = datetime(2024, 1, 10, 8, 0, 0)
 
-    # Content data
     content_data = {
         "description": "Test description",
         "generic": "Test generic details",
@@ -27,18 +25,15 @@ def test_build_rule_hit_v2_basic():
         "tags": ["test", "critical"],
     }
 
-    # Insights details
     insights_details = {
         "info": "Additional insights info",
         "affected_objects": ["obj1", "obj2"],
     }
 
-    # Build response
     response = ResponseBuilder.build_rule_hit_v2(
         hit, content_data, insights_details
     )
 
-    # Verify
     assert isinstance(response, RuleHitDetailedResponse)
     assert response.rule_id == "ccx_rules_ocp.external.rules.test_rule"
     assert response.description == "Test description"
@@ -58,17 +53,15 @@ def test_build_rule_hit_v2_with_publish_date():
     hit = Mock()
     hit.rule_fqdn = "test.rule"
     hit.error_key = "ERROR"
-    hit.updated_at = datetime(2024, 1, 15, 10, 30, 0)
+    hit.impacted_since = datetime(2024, 1, 15, 10, 30, 0)
 
     content_data = {
         "description": "Test",
         "total_risk": 2,
     }
 
-    publish_date = "2024-01-10T08:00:00Z"
-
     response = ResponseBuilder.build_rule_hit_v2(
-        hit, content_data, {}, publish_date
+        hit, content_data, {}, "2024-01-10T08:00:00Z"
     )
 
     assert response.created_at == "2024-01-10T08:00:00Z"
@@ -79,9 +72,7 @@ def test_build_rule_hit_v2_extra_data():
     hit = Mock()
     hit.rule_fqdn = "test.rule"
     hit.error_key = "ERROR_KEY"
-    hit.updated_at = datetime(2024, 1, 15, 10, 30, 0)
-
-    content_data = {"description": "Test"}
+    hit.impacted_since = datetime(2024, 1, 15, 10, 30, 0)
 
     insights_details = {
         "custom_field": "custom_value",
@@ -89,7 +80,7 @@ def test_build_rule_hit_v2_extra_data():
     }
 
     response = ResponseBuilder.build_rule_hit_v2(
-        hit, content_data, insights_details
+        hit, {"description": "Test"}, insights_details
     )
 
     assert response.extra_data["error_key"] == "ERROR_KEY"
@@ -103,12 +94,9 @@ def test_build_rule_hit_v2_missing_optional_fields():
     hit = Mock()
     hit.rule_fqdn = "test.rule"
     hit.error_key = "ERROR"
-    hit.updated_at = datetime(2024, 1, 15, 10, 30, 0)
+    hit.impacted_since = datetime(2024, 1, 15, 10, 30, 0)
 
-    # Minimal content data
-    content_data = {}
-
-    response = ResponseBuilder.build_rule_hit_v2(hit, content_data, {})
+    response = ResponseBuilder.build_rule_hit_v2(hit, {}, {})
 
     assert response.description == ""
     assert response.details == ""
@@ -119,35 +107,27 @@ def test_build_rule_hit_v2_missing_optional_fields():
     assert response.tags == []
 
 
-def test_build_rule_hit_v2_invalid_publish_date_fallback():
-    """Test that invalid publish date falls back to updated_at."""
+def test_build_rule_hit_v2_invalid_publish_date():
+    """Test that invalid publish date results in None created_at."""
     hit = Mock()
     hit.rule_fqdn = "test.rule"
     hit.error_key = "ERROR"
-    hit.updated_at = datetime(2024, 1, 15, 10, 30, 0)
-
-    content_data = {"description": "Test"}
-
-    # Invalid publish date
-    publish_date = "invalid-date"
+    hit.impacted_since = datetime(2024, 1, 15, 10, 30, 0)
 
     response = ResponseBuilder.build_rule_hit_v2(
-        hit, content_data, {}, publish_date
+        hit, {"description": "Test"}, {}, "invalid-date"
     )
 
-    # Should fall back to updated_at
-    assert response.created_at == "2024-01-15T10:30:00Z"
+    assert response.created_at is None
 
 
-def test_build_rule_hit_v2_impacted_timestamp():
-    """Test that impacted timestamp is set from updated_at."""
+def test_build_rule_hit_v2_impacted_from_impacted_since():
+    """Test that impacted timestamp comes from hit.impacted_since."""
     hit = Mock()
     hit.rule_fqdn = "test.rule"
     hit.error_key = "ERROR"
-    hit.updated_at = datetime(2024, 2, 20, 14, 45, 30)
+    hit.impacted_since = datetime(2024, 2, 20, 14, 45, 30)
 
-    content_data = {"description": "Test"}
-
-    response = ResponseBuilder.build_rule_hit_v2(hit, content_data, {})
+    response = ResponseBuilder.build_rule_hit_v2(hit, {"description": "Test"}, {})
 
     assert response.impacted == "2024-02-20T14:45:30Z"

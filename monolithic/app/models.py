@@ -85,6 +85,7 @@ class RuleHit(Base):
     rule_fqdn = Column(VARCHAR, nullable=False)
     error_key = Column(VARCHAR, nullable=False)
     updated_at = Column(DateTime, nullable=True)
+    impacted_since = Column(DateTime, nullable=True)
 
     __table_args__ = (
         PrimaryKeyConstraint(
@@ -117,9 +118,10 @@ class RuleHit(Base):
             rule_fqdn=rule_fqdn,
             error_key=error_key,
             updated_at=now,
+            impacted_since=now,
         )
 
-        # On conflict, just update timestamp
+        # On conflict, just update updated_at timestamp
         stmt = stmt.on_conflict_do_update(
             constraint="rule_hit_pkey",
             set_={

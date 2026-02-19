@@ -15,6 +15,7 @@ ERROR_KEY = "TEST_ERROR"
 GATHERED_AT = datetime(2024, 1, 15, 10, 0, 0)
 LAST_CHECKED_AT = datetime(2024, 1, 15, 11, 0, 0)
 UPDATED_AT = datetime(2024, 1, 15, 10, 30, 0)
+IMPACTED_SINCE = datetime(2024, 1, 10, 8, 0, 0)
 
 
 @pytest.fixture
@@ -77,6 +78,7 @@ def test_get_cluster_report_v2_success(database, report_service, mock_content_se
         rule_fqdn=RULE_FQDN,
         error_key=ERROR_KEY,
         updated_at=UPDATED_AT,
+        impacted_since=IMPACTED_SINCE,
     )
     database.add(rule_hit)
     database.commit()
@@ -145,6 +147,7 @@ def test_get_cluster_report_v2_content_not_found(database, report_service, mock_
         rule_fqdn="unknown.rule",
         error_key="UNKNOWN_ERROR",
         updated_at=UPDATED_AT,
+        impacted_since=IMPACTED_SINCE,
     )
     database.add(rule_hit)
     database.commit()
@@ -172,6 +175,7 @@ def test_build_rule_hits_v2_normalizes_rule_fqdn(database, report_service, mock_
         rule_fqdn=RULE_FQDN + ".report",
         error_key=ERROR_KEY,
         updated_at=UPDATED_AT,
+        impacted_since=IMPACTED_SINCE,
     )
     database.add(rule_hit)
     database.commit()
@@ -198,6 +202,7 @@ def test_get_cluster_report_v2_multiple_hits(database, report_service):
             rule_fqdn=f"rule_{i}",
             error_key=f"ERROR_{i}",
             updated_at=UPDATED_AT,
+            impacted_since=IMPACTED_SINCE,
         )
         database.add(rule_hit)
     database.commit()
