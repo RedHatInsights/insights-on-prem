@@ -58,8 +58,7 @@ class ProcessorService:
             f"Processor initialized with {len(self.target_components)} components"
         )
 
-    @staticmethod
-    def _get_component_graphs(target_components: List[str]) -> Dict:
+    def _get_component_graphs(self, target_components: List[str]) -> Dict:
         """
         Get dependency graphs for target components.
 
