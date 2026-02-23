@@ -20,6 +20,50 @@ class ErrorResponse(BaseModel):
     detail: Optional[str] = Field(None, description="Additional error details")
 
 
+# Schemas for upgrade risks prediction endpoint
+class UpgradeRisksPredictionRequest(BaseModel):
+    """Request body for upgrade risks prediction."""
+
+    cluster_id: str = Field(..., description="Cluster UUID")
+
+
+class AlertResponse(BaseModel):
+    """Alert information from Thanos metrics."""
+
+    name: str = Field(..., description="Alert name")
+    namespace: Optional[str] = Field(None, description="Alert namespace")
+    severity: str = Field(..., description="Alert severity")
+    url: Optional[str] = Field(None, description="Console URL for the alert")
+
+
+class OperatorConditionResponse(BaseModel):
+    """Failing operator condition from Thanos metrics."""
+
+    name: str = Field(..., description="Operator name")
+    condition: str = Field(..., description="Condition type")
+    reason: Optional[str] = Field(None, description="Condition reason")
+    url: Optional[str] = Field(None, description="Console URL for the operator")
+
+
+class UpgradeRisksPredictors(BaseModel):
+    """Predictors that indicate upgrade risks."""
+
+    alerts: List[AlertResponse] = Field(default_factory=list, description="Risky alerts")
+    operator_conditions: List[OperatorConditionResponse] = Field(
+        default_factory=list, description="Failing operator conditions"
+    )
+
+
+class UpgradeRisksPredictionResponse(BaseModel):
+    """Response for upgrade risks prediction endpoint."""
+
+    upgrade_recommended: bool = Field(..., description="Whether upgrade is recommended")
+    upgrade_risks_predictors: UpgradeRisksPredictors = Field(
+        ..., description="Detected upgrade risk predictors"
+    )
+    status: str = Field(default="ok", description="Response status")
+
+
 # Schemas for v2 cluster report endpoint
 class ReportMetaV2(BaseModel):
     """Metadata for v2 cluster report."""
