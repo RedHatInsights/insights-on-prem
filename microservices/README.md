@@ -7,15 +7,12 @@ This is a streamlined deployment of the EDP stack directly to an OpenShift clust
 The EDP consists of:
 
 ### Infrastructure Services
-- **PostgreSQL**: Database for aggregator (notifications service removed)
+- **PostgreSQL**: Two instances for aggregator and notification databases
 - **Kafka**: Message broker for data pipeline communication (Strimzi operator)
-- **Redis**: Cache for smart-proxy results (optional - improves query performance)
+- **Redis**: Cache for aggregator results
 - **MinIO**: S3-compatible storage for uploaded archives
 - **Mock OAuth2 Server**: For development/testing authentication
-- **Identity Injector**: Nginx proxy with three functions:
-  - Adds x-rh-identity header for smart-proxy/ingress requests (acts like 3scale)
-  - Proxies upgrades service to Thanos with ServiceAccount token authentication
-  - Translates RHOBS API paths to Thanos API paths
+- **Identity Injector**: Python FastAPI proxy that adds x-rh-identity header (acts like 3scale for on-prem) and rewrites RHOBS metric conventions to MCO/Prometheus conventions for upgrade risk predictions
 
 ### Processing Services
 - **ingress**: HTTP endpoint for receiving archive uploads (port 3000)
@@ -29,12 +26,11 @@ The EDP consists of:
 - **content-service**: Provides recommendation content and metadata (port 8081)
 - **ccx-upgrades-data-eng**: Upgrade risk prediction data engineering service
 - **ccx-upgrades-inference**: ML inference service for upgrade risks
+- **notification-writer**: Writes notification events to database
 
-Total: **16 pods**
+Total: **20 pods**
 
 ## Architecture
-
-![EDP Architecture](docs/on_prem_done.png)
 
 The on-prem deployment consists of two main data paths:
 
@@ -45,23 +41,21 @@ The on-prem deployment consists of two main data paths:
 4. ccx-data-pipeline processes the archive and extracts recommendations
 5. Writers store results in PostgreSQL and Redis
 
-**Query Path** (OCM UI/insights-client/insights-operator → identity-injector → smart-proxy → aggregator):
-1. Client (OCM UI in production, insights-client/insights-operator on-prem) requests reports from identity-injector
+**Query Path** (insights-client → identity-injector → smart-proxy → aggregator):
+1. insights-client requests reports from identity-injector
 2. Identity-injector adds x-rh-identity header with org_id=000001 and forwards to smart-proxy
-3. Smart-proxy checks Redis cache, or forwards to aggregator if cache miss
+3. Smart-proxy validates identity and forwards to aggregator
 4. Aggregator queries PostgreSQL and returns results
-5. Smart-proxy caches results in Redis for faster subsequent queries
-6. Results displayed in OCM UI (production) or insights-client PolicyReports / insights-operator CR (on-prem)
 
-**Upgrades/Thanos Path** (ccx-upgrades-data-eng → identity-injector → Thanos → Prometheus):
-1. ccx-upgrades-data-eng queries cluster metrics using RHOBS API format
-2. Identity-injector translates path (/api/metrics/v1/telemeter/api/v1/* → /api/v1/*)
-3. Identity-injector adds ServiceAccount token authentication
-4. Thanos Querier returns real cluster metrics from Prometheus
-5. ccx-upgrades-data-eng processes metrics and sends to ccx-upgrades-inference
-6. ML service predicts upgrade risk based on cluster health
+The identity-injector acts like 3scale in production - it adds authentication headers for on-prem deployments where clients don't send x-rh-identity.
 
-The identity-injector acts as a multi-purpose proxy: adds x-rh-identity for on-prem deployments, and provides authenticated access to Thanos for the upgrades service.
+**Upgrade Risk Prediction Path** (ccx-upgrades-data-eng → identity-injector → MCO Thanos):
+1. ccx-upgrades-data-eng queries identity-injector for Thanos metrics
+2. Identity-injector rewrites RHOBS-style metric names (`_id`, `alerts`) to MCO conventions (`clusterID`, `ALERTS`)
+3. Query is forwarded to MCO Thanos (observability-thanos-query) with real cluster metrics
+4. ccx-upgrades-inference scores the results and returns upgrade risk predictions
+
+MCO (MultiCluster Observability) is required for upgrade risk predictions. Run `./edp.sh mco` to install it.
 
 ## Quick Start
 
@@ -103,6 +97,7 @@ oc secrets link default quay-pull-secret --for=pull -n edp-processing
 ./edp.sh services     # Step 3: Processing services and identity-injector
 ./edp.sh routes       # Step 4: Create routes
 ./edp.sh insights     # Step 5: Configure insights-operator
+./edp.sh mco          # Step 6: Install MCO + Thanos (required for upgrade risk predictions)
 
 # Optional: Configure ACM insights-client (requires ACM)
 ./edp.sh acm-client
@@ -118,12 +113,13 @@ oc secrets link default quay-pull-secret --for=pull -n edp-processing
 ```
 
 **Available Commands:**
-- `./edp.sh all` - Complete automated setup (runs all steps)
+- `./edp.sh all` - Complete automated setup (runs all steps including MCO)
 - `./edp.sh kafka` - Install Strimzi operator and deploy Kafka cluster
 - `./edp.sh databases` - Deploy PostgreSQL, Redis, MinIO, and mocks
 - `./edp.sh services` - Deploy all EDP processing services and identity-injector
 - `./edp.sh routes` - Create OpenShift routes for services
 - `./edp.sh insights` - Configure insights-operator to use local EDP
+- `./edp.sh mco` - Install MCO + Thanos (required for upgrade risk predictions)
 - `./edp.sh acm-client` - Configure ACM insights-client (optional, requires ACM)
 - `./edp.sh verify` - Health check (verify all components are running)
 - `./verify-pipeline.sh` - Verify archive upload and processing
@@ -214,7 +210,7 @@ oc get pods -n edp-processing
 # Check Kafka
 oc get pods -n kafka
 
-# You should see all 16 pods in Running state (plus minio-create-buckets job in Completed state)
+# You should see all 20 pods in Running state
 ```
 
 Expected output:
@@ -238,6 +234,7 @@ minio-create-buckets-cc5xg                0/1     Completed   0          2m22s
 mock-oauth2-server-5bd8bd579-pmbrk        1/1     Running     0          2m24s
 postgresql-0                              1/1     Running     0          2m26s
 redis-5f6b544485-wmzbj                    1/1     Running     0          2m25s
+rhobs-mock-85895c697b-ct5b7               1/1     Running     0          2m23s
 smart-proxy-58f8ddffb9-xxwkl              1/1     Running     0          102s
 
 > oc get pods -n kafka
@@ -252,7 +249,7 @@ strimzi-cluster-operator-6c84667cb8-2n9f9    1/1     Running   0          5m59s
 
 ### Expose Services
 
-To test the data pipeline, expose the ingress and smart-proxy services:
+To test the data pipeline, expose the ingress and aggregator services:
 
 ```bash
 # Expose ingress for archive uploads
@@ -261,22 +258,32 @@ oc create route edge ingress \
   --port=3000 \
   -n edp-processing
 
-# Expose smart-proxy for querying results
+# Expose aggregator for querying results
+oc create route edge aggregator \
+  --service=aggregator \
+  --port=8082 \
+  -n edp-processing
+
+# Expose smart-proxy
 oc create route edge smart-proxy \
   --service=smart-proxy \
   --port=8080 \
   -n edp-processing
 ```
 
-### Option 1: Manual Test Upload (Quick Testing)
+### Option 1: Manual Upload Test Archive
 
-Upload a test archive using a Python script to verify the pipeline works:
+For quick testing, you can manually upload a test archive:
 
 ```bash
 # Setup Python environment (first time only)
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+
+# Install molodec for generating test archives
+export PIP_INDEX_URL=https://repository.engineering.redhat.com/nexus/repository/insights-qe/simple
+pip install -U molodec
 
 # Upload test archive
 INGRESS_URL=$(oc get route ingress -n edp-processing -o jsonpath='{.spec.host}')
@@ -290,16 +297,16 @@ Status Code: 202
 ✅ Archive uploaded successfully!
 ```
 
-### Option 2: Use insights-operator
+### Option 2: Configure Local Insights Pipeline
 
-Configure the cluster's insights-operator to automatically send real cluster data to the On prem solution instead of console.redhat.com.
+This option configures the insights pipeline to use your local EDP stack instead of Red Hat's cloud services.
 
-**Basic setup** (works on any OpenShift cluster):
-1. Configure **insights-operator** to upload to your EDP **ingress:3000**
-2. insights-operator automatically collects and uploads cluster data every 2 hours by default
+**Basic pipeline** (works on any OpenShift cluster):
+1. **insights-operator** → uploads cluster data to local **ingress:3000**
+2. Processing pipeline → processes the data and stores in database
 
-**Full setup with ACM** (requires ACM installed):
-3. Configure **insights-client** to fetch processed results from **smart-proxy:8080** and create PolicyReports
+**Full pipeline with insights-client** (requires ACM):
+3. **insights-client** → fetches results from **identity-injector:8080** → **smart-proxy:8080** → **aggregator:8082** and creates PolicyReports
 
 #### Step 1: Ingress and Identity-Injector Configuration
 
@@ -335,7 +342,6 @@ type: Opaque
 stringData:
   endpoint: "http://identity-injector.edp-processing.svc.cluster.local:8080/api/ingress/v1/upload"
   insights-url: "http://identity-injector.edp-processing.svc.cluster.local:8080/api/v2"
-  reportEndpoint: "http://identity-injector.edp-processing.svc.cluster.local:8080/api/v2/cluster/%s/reports"
 EOF
 
 # Restart insights-operator to pick up the new configuration
@@ -347,8 +353,7 @@ oc wait --for=condition=ready pod -l app=insights-operator -n openshift-insights
 
 **What these settings do:**
 - `endpoint`: Where insights-operator **uploads** cluster archives (identity-injector → ingress)
-- `insights-url`: Base URL for insights-operator API calls
-- `reportEndpoint`: Where insights-operator **downloads** processed recommendations (identity-injector → smart-proxy → aggregator/Redis)
+- `insights-url`: Where insights-operator **queries** for reports (identity-injector → smart-proxy)
 
 **Verify insights-operator configuration:**
 
@@ -462,9 +467,6 @@ oc logs -n open-cluster-management deployment/insights-client -f
 
 # 7. Check PolicyReports created by insights-client
 oc get policyreports -A
-
-# 8. View detailed PolicyReport for local-cluster
-oc describe policyreport -n local-cluster local-cluster-policyreport
 ```
 
 ### Verify the Pipeline is Working
@@ -472,14 +474,7 @@ oc describe policyreport -n local-cluster local-cluster-policyreport
 **Quick verification using the script:**
 
 ```bash
-# Run basic checks
 ./verify-pipeline.sh
-
-# Run with verbose output (shows commands and matching log lines)
-./verify-pipeline.sh -v
-
-# View detailed PolicyReport (if ACM is installed)
-oc describe policyreport -n local-cluster local-cluster-policyreport
 ```
 
 **Manual verification:**
@@ -508,20 +503,17 @@ oc logs -n edp-processing deployment/db-writer --since=3h | grep "processing mes
 # "cluster":"00ff20e8-2326-4373-bce0-194ec01a59d1"
 # "issues found":0  <- This is normal for a healthy cluster!
 # "message":"Stored info report"
+```
 
-# 5. Check insights-operator downloaded recommendations
-oc logs -n openshift-insights deployment/insights-operator --since=3h | grep "Report retrieved"
+### Query Results from Aggregator
 
-# 6. Verify InsightsOperator CR was updated with healthChecks
-oc get insightsoperator cluster -o yaml | grep -A 20 "insightsReport:"
+```bash
+# Get the aggregator URL
+AGGREGATOR_URL=$(oc get route aggregator -n edp-processing -o jsonpath='{.spec.host}')
 
-# Expected output:
-#   insightsReport:
-#     downloadedAt: "2026-02-17T15:01:35Z"
-#     healthChecks:
-#     - description: "..."
-#       totalRisk: 1
-#       state: Enabled
+# Query cluster reports (replace with your test cluster ID)
+CLUSTER_ID="9f1511c6-6ef4-48ef-8fe9-e6dfea7076f0"
+curl -sk "https://$AGGREGATOR_URL/api/v1/organizations/1/clusters/$CLUSTER_ID/reports" | jq
 ```
 
 ### Query Results from Smart Proxy
@@ -539,48 +531,6 @@ curl -sk -H "x-rh-identity: $IDENTITY_HEADER" \
   "https://$SMART_PROXY_URL/api/v1/clusters/$CLUSTER_ID/report" | \
   jq '.report.data[] | {rule_id, description, total_risk, resolution}'
 ```
-
-### Test Upgrades Services
-
-The upgrades services predict upgrade risk using cluster metrics from Thanos/Prometheus.
-
-**Architecture:** Prometheus → Thanos → identity-injector → ccx-upgrades-data-eng → ccx-upgrades-inference
-
-```bash
-# Check services are running
-oc get pods -n edp-processing | grep upgrade
-# Should show:
-#   ccx-upgrades-data-eng-xxx   1/1     Running
-#   ccx-upgrades-inference-xxx  1/1     Running
-
-# Check data-eng metrics (requires port-forward)
-oc port-forward -n edp-processing deployment/ccx-upgrades-data-eng 8001:8000 &
-sleep 2
-curl -s http://localhost:8001/metrics | grep -E "ccx_upgrades.*total"
-kill %1
-
-# Check inference metrics (requires port-forward)
-oc port-forward -n edp-processing deployment/ccx-upgrades-inference 8002:8000 &
-sleep 2
-curl -s http://localhost:8002/metrics | grep -E "ccx_upgrades.*total"
-kill %1
-
-# View service logs
-oc logs -n edp-processing deployment/ccx-upgrades-data-eng --tail=20
-oc logs -n edp-processing deployment/ccx-upgrades-inference --tail=20
-
-# Test upgrade risk prediction via smart-proxy
-CLUSTER_ID=$(oc get clusterversion -o jsonpath='{.items[0].spec.clusterID}')
-curl -sk -H "x-rh-identity: $IDENTITY_HEADER" \
-  -H "Content-Type: application/json" \
-  -d "{\"cluster_id\": \"$CLUSTER_ID\"}" \
-  "https://$SMART_PROXY_URL/api/v1/upgrade-risks-prediction" | jq '.'
-```
-
-**Note:** Upgrade risk prediction requires:
-- ACM Observability (Thanos) to be installed
-- Cluster metrics available in Prometheus
-- Both ccx-upgrades-data-eng and ccx-upgrades-inference running
 
 ## Configuration
 

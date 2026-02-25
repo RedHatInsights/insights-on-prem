@@ -1,0 +1,65 @@
+---
+# MCO namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: open-cluster-management-observability
+
+---
+# Thanos object storage secret - points to MinIO in edp-processing
+apiVersion: v1
+kind: Secret
+metadata:
+  name: thanos-object-storage
+  namespace: open-cluster-management-observability
+type: Opaque
+stringData:
+  thanos.yaml: |
+    type: s3
+    config:
+      bucket: thanos
+      endpoint: minio.edp-processing.svc.cluster.local:9000
+      insecure: true
+      access_key: minio
+      secret_key: minio123
+
+---
+# Job to create the thanos bucket in MinIO
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-create-thanos-bucket
+  namespace: edp-processing
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: quay.io/minio/mc:latest
+          env:
+            - name: HOME
+              value: /tmp
+          command:
+            - /bin/sh
+            - -c
+            - |
+              mc alias set minio http://minio:9000 minio minio123
+              mc mb --ignore-existing minio/thanos
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+
+---
+# MultiClusterObservability CR - uses MinIO as Thanos object storage
+apiVersion: observability.open-cluster-management.io/v1beta2
+kind: MultiClusterObservability
+metadata:
+  name: observability
+spec:
+  observabilityAddonSpec: {}
+  storageConfig:
+    metricObjectStorage:
+      name: thanos-object-storage
+      key: thanos.yaml

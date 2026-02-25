@@ -93,11 +93,27 @@ configure_acm_client() {
     echo "Run './verify-pipeline.sh' to verify query processing"
 }
 
+setup_mco() {
+    echo "=== MCO (MultiCluster Observability) ==="
+    oc get crd multiclusterobservabilities.observability.open-cluster-management.io &>/dev/null || \
+        { echo "❌ MCO CRD not found - is ACM installed?"; return 1; }
+    if oc get multiclusterobservability observability &>/dev/null; then
+        echo "✓ MCO already installed"
+        return 0
+    fi
+    oc apply -f deploy/09-mco.yaml
+    oc wait --for=condition=complete job/minio-create-thanos-bucket -n edp-processing --timeout=60s
+    echo "Waiting for MCO Thanos to be ready..."
+    oc wait --for=condition=ready pod -l app.kubernetes.io/name=thanos-query \
+        -n open-cluster-management-observability --timeout=300s
+    echo "✓ MCO installed - Thanos ready"
+}
+
 setup_all() {
     oc whoami &>/dev/null || { echo "❌ Not logged in"; return 1; }
     oc cluster-info | head -1
     confirm "Correct cluster?" || return 1
-    setup_kafka && setup_databases && setup_edp_services && expose_services && configure_insights
+    setup_kafka && setup_databases && setup_edp_services && expose_services && configure_insights && setup_mco
     echo -e "\n✓ Setup complete"
     oc get pods -n kafka -n edp-processing
 }
@@ -187,6 +203,7 @@ Commands:
   services    Deploy EDP services
   routes      Expose routes
   insights    Configure insights-operator
+  mco         Install MCO + Thanos (required for upgrade risk predictions)
   acm-client  Configure ACM insights-client (optional)
   cleanup     Delete everything
   restart     Restart infrastructure
@@ -204,6 +221,7 @@ case "${1:-}" in
     services) setup_edp_services ;;
     routes) expose_services ;;
     insights) configure_insights ;;
+    mco) setup_mco ;;
     acm-client) configure_acm_client ;;
     cleanup) cleanup ;;
     restart) restart_infra ;;
