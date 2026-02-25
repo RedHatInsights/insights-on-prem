@@ -1,0 +1,142 @@
+# Upgrades Services (Optional)
+# - ccx-upgrades-data-eng: Upgrade risk prediction data engineering service
+# - ccx-upgrades-inference: ML inference service for upgrade risks
+
+---
+# Deployment: ccx-upgrades-data-eng
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ccx-upgrades-data-eng
+  namespace: edp-processing
+  labels:
+    app: ccx-upgrades-data-eng
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ccx-upgrades-data-eng
+  template:
+    metadata:
+      labels:
+        app: ccx-upgrades-data-eng
+    spec:
+      containers:
+        - name: ccx-upgrades-data-eng
+          image: quay.io/redhat-services-prod/obsint-processing-tenant/upgrades-data-eng/upgrades-data-eng:latest
+          env:
+            - name: INFERENCE_URL
+              value: "http://ccx-upgrades-inference:8000"
+            - name: CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: upgrades-credentials
+                  key: oauth-client-id
+            - name: CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: upgrades-credentials
+                  key: oauth-client-secret
+            - name: SSO_ISSUER
+              valueFrom:
+                secretKeyRef:
+                  name: upgrades-credentials
+                  key: oauth-issuer
+            - name: RHOBS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: upgrades-credentials
+                  key: rhobs-url
+            - name: ALLOW_INSECURE
+              value: "1"
+            - name: OAUTHLIB_INSECURE_TRANSPORT
+              value: "0"
+            - name: CACHE_ENABLED
+              value: "1"
+            - name: CACHE_TTL
+              value: "3600"
+            - name: LOG_LEVEL
+              value: "INFO"
+          ports:
+            - containerPort: 8000
+              name: http
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+---
+# Service: ccx-upgrades-data-eng
+apiVersion: v1
+kind: Service
+metadata:
+  name: ccx-upgrades-data-eng
+  namespace: edp-processing
+  labels:
+    app: ccx-upgrades-data-eng
+spec:
+  type: ClusterIP
+  selector:
+    app: ccx-upgrades-data-eng
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8000
+      targetPort: 8000
+
+---
+# Deployment: ccx-upgrades-inference
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ccx-upgrades-inference
+  namespace: edp-processing
+  labels:
+    app: ccx-upgrades-inference
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ccx-upgrades-inference
+  template:
+    metadata:
+      labels:
+        app: ccx-upgrades-inference
+    spec:
+      containers:
+        - name: ccx-upgrades-inference
+          image: quay.io/redhat-services-prod/obsint-processing-tenant/upgrades-inference/upgrades-inference:latest
+          ports:
+            - containerPort: 8000
+              name: http
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+
+---
+# Service: ccx-upgrades-inference
+apiVersion: v1
+kind: Service
+metadata:
+  name: ccx-upgrades-inference
+  namespace: edp-processing
+  labels:
+    app: ccx-upgrades-inference
+spec:
+  type: ClusterIP
+  selector:
+    app: ccx-upgrades-inference
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8000
+      targetPort: 8000
+
+---

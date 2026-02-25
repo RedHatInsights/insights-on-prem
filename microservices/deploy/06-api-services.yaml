@@ -1,0 +1,267 @@
+# API/Query Services
+# - aggregator: REST API for querying stored recommendations
+# - smart-proxy: Unified API that aggregates multiple backend services
+# - content-service: Provides recommendation content and metadata
+
+---
+# Deployment: aggregator
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aggregator
+  namespace: edp-processing
+  labels:
+    app: aggregator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aggregator
+  template:
+    metadata:
+      labels:
+        app: aggregator
+    spec:
+      containers:
+        - name: aggregator
+          image: quay.io/redhat-services-prod/obsint-processing-tenant/aggregator/aggregator:latest
+          env:
+            - name: INSIGHTS_RESULTS_AGGREGATOR__STORAGE_BACKEND__USE
+              value: "ocp_recommendations"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__TYPE
+              value: "sql"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__DB_DRIVER
+              value: "postgres"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_PARAMS
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: pg-params
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: username
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: password
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: host
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: port
+            - name: INSIGHTS_RESULTS_AGGREGATOR__OCP_RECOMMENDATIONS_STORAGE__PG_DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: database
+            - name: INSIGHTS_RESULTS_AGGREGATOR__LOGGING__LOG_LEVEL
+              value: "info"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__LOGGING__DEBUG
+              value: "false"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__SERVER__API_PREFIX
+              value: "/api/v1/"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__SERVER__API_SPEC_FILE
+              value: "/openapi/openapi.json"
+            - name: INSIGHTS_RESULTS_AGGREGATOR__SERVER__ADDRESS
+              value: ":8082"
+          ports:
+            - containerPort: 8082
+              name: http
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+---
+# Service: aggregator
+apiVersion: v1
+kind: Service
+metadata:
+  name: aggregator
+  namespace: edp-processing
+  labels:
+    app: aggregator
+spec:
+  type: ClusterIP
+  selector:
+    app: aggregator
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8082
+      targetPort: 8082
+
+---
+# Deployment: content-service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: content-service
+  namespace: edp-processing
+  labels:
+    app: content-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: content-service
+  template:
+    metadata:
+      labels:
+        app: content-service
+    spec:
+      containers:
+        - name: content-service
+          image: quay.io/redhat-services-prod/obsint-processing-tenant/content-service/content-service:latest
+          env:
+            - name: INSIGHTS_CONTENT_SERVICE__SERVER__ADDRESS
+              value: ":8081"
+            - name: INSIGHTS_CONTENT_SERVICE__SERVER__API_PREFIX
+              value: "/api/v1/"
+            - name: INSIGHTS_CONTENT_SERVICE__SERVER__API_SPEC_FILE
+              value: "/openapi/openapi.json"
+            - name: INSIGHTS_CONTENT_SERVICE__GROUPS__PATH
+              value: "/groups/groups_config.yaml"
+          ports:
+            - containerPort: 8081
+              name: http
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+
+---
+# Service: content-service
+apiVersion: v1
+kind: Service
+metadata:
+  name: content-service
+  namespace: edp-processing
+  labels:
+    app: content-service
+spec:
+  type: ClusterIP
+  selector:
+    app: content-service
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8081
+      targetPort: 8081
+
+---
+# Deployment: smart-proxy
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smart-proxy
+  namespace: edp-processing
+  labels:
+    app: smart-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: smart-proxy
+  template:
+    metadata:
+      labels:
+        app: smart-proxy
+    spec:
+      containers:
+        - name: smart-proxy
+          image: quay.io/redhat-services-prod/obsint-processing-tenant/smart-proxy/smart-proxy:latest
+          env:
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVER__ADDRESS
+              value: ":8080"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVER__API_DBG_PREFIX
+              value: "/api/dbg/"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVER__API_V1_PREFIX
+              value: "/api/v1/"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVER__API_V2_PREFIX
+              value: "/api/v2/"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVER__API_V1_SPEC_FILE
+              value: "/openapi/v1/openapi.json"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVER__API_V2_SPEC_FILE
+              value: "/openapi/v2/openapi.json"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVICES__GROUPS_POLL_TIME
+              value: "60s"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVICES__CONTENT
+              value: "http://content-service:8081/api/v1/"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVICES__AGGREGATOR
+              value: "http://aggregator:8082/api/v1/"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVICES__UPGRADE_RISKS_PREDICTION
+              value: "http://ccx-upgrades-data-eng:8000/"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__REDIS__ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: redis-credentials
+                  key: endpoint
+            - name: INSIGHTS_RESULTS_SMART_PROXY__REDIS__DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: redis-credentials
+                  key: database
+            - name: INSIGHTS_RESULTS_SMART_PROXY__REDIS__PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-credentials
+                  key: password
+            - name: INSIGHTS_RESULTS_SMART_PROXY__REDIS__TIMEOUT_SECONDS
+              value: "30"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVER__DEBUG
+              value: "false"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVER__AUTH
+              value: "true"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVER__AUTH_TYPE
+              value: "xrh"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVER__USE_HTTPS
+              value: "false"
+            - name: INSIGHTS_RESULTS_SMART_PROXY__SERVER__ORG_CLUSTERS_FALLBACK
+              value: "true"
+          ports:
+            - containerPort: 8080
+              name: http
+          command: ["/insights-results-smart-proxy"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+---
+# Service: smart-proxy
+apiVersion: v1
+kind: Service
+metadata:
+  name: smart-proxy
+  namespace: edp-processing
+  labels:
+    app: smart-proxy
+spec:
+  type: ClusterIP
+  selector:
+    app: smart-proxy
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8080
+      targetPort: 8080
+
+---

@@ -1,0 +1,139 @@
+# Strimzi Kafka for EDP ACM Addon
+# This uses KRaft mode (no Zookeeper) - simpler and lighter!
+#
+# Prerequisites: Strimzi operator must be installed first
+# kubectl create namespace kafka
+# kubectl create -f 'https://strimzi.io/install/latest?namespace=kafka' -n kafka
+#
+# NOTE: Kafka is deployed in the 'kafka' namespace for infrastructure separation
+# Application services in 'edp-processing' connect to Kafka via service name:
+# edp-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092
+
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaNodePool
+metadata:
+  name: dual-role
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: edp-kafka
+spec:
+  replicas: 1
+  roles:
+    - controller
+    - broker
+  storage:
+    type: persistent-claim
+    size: 20Gi
+    deleteClaim: false
+
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: Kafka
+metadata:
+  name: edp-kafka
+  namespace: kafka
+  annotations:
+    strimzi.io/kraft: enabled
+    strimzi.io/node-pools: enabled
+spec:
+  kafka:
+    version: 4.1.1
+    metadataVersion: 4.1-IV0
+    replicas: 1
+    listeners:
+      - name: plain
+        port: 9092
+        type: internal
+        tls: false
+      - name: tls
+        port: 9093
+        type: internal
+        tls: true
+    config:
+      offsets.topic.replication.factor: 1
+      transaction.state.log.replication.factor: 1
+      transaction.state.log.min.isr: 1
+      default.replication.factor: 1
+      min.insync.replicas: 1
+    storage:
+      type: persistent-claim
+      size: 20Gi
+      deleteClaim: false
+  entityOperator:
+    topicOperator: {}
+
+---
+# Topic: platform.upload.announce
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: platform.upload.announce
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: edp-kafka
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000  # 7 days
+
+---
+# Topic: ccx.ocp.results
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: ccx.ocp.results
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: edp-kafka
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+
+---
+# Topic: dvo.results
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: dvo.results
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: edp-kafka
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+
+---
+# Topic: platform.payload-status
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: platform.payload-status
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: edp-kafka
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+
+---
+# Topic: dead.letter.queue
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: dead.letter.queue
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: edp-kafka
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000

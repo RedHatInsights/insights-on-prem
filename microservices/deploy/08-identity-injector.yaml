@@ -1,0 +1,187 @@
+# Identity Injector - acts like 3scale for on-prem
+# Python FastAPI proxy that:
+# - Adds x-rh-identity header to all requests
+# - Routes /api/ingress/ → ingress (archive uploads)
+# - Routes /api/metrics/v1/{tenant}/api/v1/* → MCO Thanos, rewriting RHOBS metric
+#   conventions (_id, alerts) to MCO conventions (clusterID, ALERTS)
+# - Routes / → smart-proxy (report queries)
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: identity-injector-config
+  namespace: edp-processing
+data:
+  proxy.py: |
+    import os
+    import logging
+    import httpx
+    from fastapi import FastAPI, Request
+    from fastapi.responses import Response
+
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+
+    app = FastAPI()
+
+    INGRESS_URL   = os.environ.get("INGRESS_URL",    "http://ingress.edp-processing.svc.cluster.local:3000")
+    SMART_PROXY_URL = os.environ.get("SMART_PROXY_URL", "http://smart-proxy.edp-processing.svc.cluster.local:8080")
+    THANOS_URL    = os.environ.get("THANOS_URL",     "http://observability-thanos-query.open-cluster-management-observability.svc.cluster.local:9090")
+
+    # {"identity":{"type":"User","account_number":"0000001","org_id":"000001","internal":{"org_id":"000001"}}}
+    RH_IDENTITY = "eyJpZGVudGl0eSI6IHsidHlwZSI6ICJVc2VyIiwgImFjY291bnRfbnVtYmVyIjogIjAwMDAwMDEiLCAib3JnX2lkIjogIjAwMDAwMSIsICJpbnRlcm5hbCI6IHsib3JnX2lkIjogIjAwMDAwMSJ9fX0="
+
+    def rewrite_promql(query: str) -> str:
+        """Translate RHOBS metric conventions to MCO/Prometheus conventions for the request."""
+        return (query
+            .replace("alerts{", "ALERTS{")
+            .replace("_id=~", "clusterID=~")
+            .replace("_id=", "clusterID=")
+        )
+
+    def rewrite_thanos_response(body: bytes) -> bytes:
+        """Translate MCO metric names/labels back to RHOBS conventions in the Thanos response."""
+        import json
+        try:
+            data = json.loads(body)
+            for result in data.get("data", {}).get("result", []):
+                metric = result.get("metric", {})
+                if metric.get("__name__") == "ALERTS":
+                    metric["__name__"] = "alerts"
+                if "clusterID" in metric:
+                    metric["_id"] = metric.pop("clusterID")
+            return json.dumps(data).encode()
+        except Exception:
+            return body
+
+    async def forward(request: Request, base_url: str, path: str, params: dict = None) -> Response:
+        headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")}
+        headers["x-rh-identity"] = RH_IDENTITY
+        async with httpx.AsyncClient() as client:
+            resp = await client.request(
+                method=request.method,
+                url=f"{base_url}/{path}",
+                headers=headers,
+                params=params if params is not None else dict(request.query_params),
+                content=await request.body(),
+                timeout=300,
+                follow_redirects=True,
+            )
+        return Response(content=resp.content, status_code=resp.status_code,
+                        media_type=resp.headers.get("content-type"))
+
+    @app.get("/healthz")
+    async def healthz():
+        return {"status": "ok"}
+
+    @app.api_route("/api/ingress/{path:path}", methods=["GET", "POST", "PUT"])
+    async def ingress_proxy(request: Request, path: str):
+        """Forward archive uploads to ingress with identity header."""
+        return await forward(request, INGRESS_URL, f"api/ingress/{path}")
+
+    @app.api_route("/api/metrics/v1/{tenant}/{path:path}", methods=["GET", "POST"])
+    async def thanos_proxy(request: Request, tenant: str, path: str):
+        """Forward Thanos queries with bidirectional MCO<->RHOBS metric name translation."""
+        params = dict(request.query_params)
+        if "query" in params:
+            original = params["query"]
+            params["query"] = rewrite_promql(original)
+            if params["query"] != original:
+                logger.debug("Rewrote PromQL: %s -> %s", original, params["query"])
+        headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")}
+        headers["x-rh-identity"] = RH_IDENTITY
+        async with httpx.AsyncClient() as client:
+            resp = await client.request(
+                method=request.method,
+                url=f"{THANOS_URL}/{path}",
+                headers=headers,
+                params=params,
+                content=await request.body(),
+                timeout=300,
+                follow_redirects=True,
+            )
+        content = rewrite_thanos_response(resp.content)
+        return Response(content=content, status_code=resp.status_code,
+                        media_type=resp.headers.get("content-type"))
+
+    @app.api_route("/api/v2/{path:path}", methods=["GET", "POST"])
+    @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+    async def smart_proxy_proxy(request: Request, path: str):
+        """Forward all other requests to smart-proxy with identity header."""
+        return await forward(request, SMART_PROXY_URL, path)
+
+    if __name__ == "__main__":
+        import uvicorn
+        uvicorn.run(app, host="0.0.0.0", port=8080)
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: identity-injector
+  namespace: edp-processing
+  labels:
+    app: identity-injector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: identity-injector
+  template:
+    metadata:
+      labels:
+        app: identity-injector
+    spec:
+      containers:
+        - name: identity-injector
+          image: registry.access.redhat.com/ubi9/python-311:latest
+          command:
+            - sh
+            - -c
+            - |
+              pip install fastapi uvicorn httpx --quiet --no-cache-dir
+              python /app/proxy.py
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: INGRESS_URL
+              value: "http://ingress.edp-processing.svc.cluster.local:3000"
+            - name: SMART_PROXY_URL
+              value: "http://smart-proxy.edp-processing.svc.cluster.local:8080"
+            - name: THANOS_URL
+              value: "http://observability-thanos-query.open-cluster-management-observability.svc.cluster.local:9090"
+          volumeMounts:
+            - name: config
+              mountPath: /app/proxy.py
+              subPath: proxy.py
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+      volumes:
+        - name: config
+          configMap:
+            name: identity-injector-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: identity-injector
+  namespace: edp-processing
+  labels:
+    app: identity-injector
+spec:
+  type: ClusterIP
+  selector:
+    app: identity-injector
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8080
+      targetPort: 8080
