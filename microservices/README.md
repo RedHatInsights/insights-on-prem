@@ -55,7 +55,7 @@ The identity-injector acts like 3scale in production - it adds authentication he
 3. Query is forwarded to MCO Thanos (observability-thanos-query) with real cluster metrics
 4. ccx-upgrades-inference scores the results and returns upgrade risk predictions
 
-MCO (MultiCluster Observability) is required for upgrade risk predictions. Run `./edp.sh mco` to install it.
+MCO (MultiCluster Observability) is required for upgrade risk predictions and must be pre-installed on the cluster.
 
 ## Quick Start
 
@@ -97,8 +97,6 @@ oc secrets link default quay-pull-secret --for=pull -n edp-processing
 ./edp.sh services     # Step 3: Processing services and identity-injector
 ./edp.sh routes       # Step 4: Create routes
 ./edp.sh insights     # Step 5: Configure insights-operator
-./edp.sh mco          # Step 6: Install MCO + Thanos (required for upgrade risk predictions)
-
 # Optional: Configure ACM insights-client (requires ACM)
 ./edp.sh acm-client
 
@@ -113,13 +111,12 @@ oc secrets link default quay-pull-secret --for=pull -n edp-processing
 ```
 
 **Available Commands:**
-- `./edp.sh all` - Complete automated setup (runs all steps including MCO)
+- `./edp.sh all` - Complete automated setup
 - `./edp.sh kafka` - Install Strimzi operator and deploy Kafka cluster
 - `./edp.sh databases` - Deploy PostgreSQL, Redis, MinIO, and mocks
 - `./edp.sh services` - Deploy all EDP processing services and identity-injector
 - `./edp.sh routes` - Create OpenShift routes for services
 - `./edp.sh insights` - Configure insights-operator to use local EDP
-- `./edp.sh mco` - Install MCO + Thanos (required for upgrade risk predictions)
 - `./edp.sh acm-client` - Configure ACM insights-client (optional, requires ACM)
 - `./edp.sh verify` - Health check (verify all components are running)
 - `./verify-pipeline.sh` - Verify archive upload and processing

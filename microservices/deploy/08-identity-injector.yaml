@@ -2,9 +2,12 @@
 # Python FastAPI proxy that:
 # - Adds x-rh-identity header to all requests
 # - Routes /api/ingress/ → ingress (archive uploads)
-# - Routes /api/metrics/v1/{tenant}/api/v1/* → MCO Thanos, rewriting RHOBS metric
-#   conventions (_id, alerts) to MCO conventions (clusterID, ALERTS)
+# - Routes /api/metrics/v1/{tenant}/api/v1/* → MCO Thanos via rbac-query-proxy,
+#   forwarding the pod's ServiceAccount token for auth and rewriting RHOBS metric
+#   conventions (_id, alerts) to MCO conventions (clusterID, ALERTS) bidirectionally
 # - Routes / → smart-proxy (report queries)
+#
+# Requires: MCO installed + identity-injector-sa with cluster-reader (09-thanos-integration.yaml)
 
 ---
 apiVersion: v1
@@ -25,9 +28,17 @@ data:
 
     app = FastAPI()
 
-    INGRESS_URL   = os.environ.get("INGRESS_URL",    "http://ingress.edp-processing.svc.cluster.local:3000")
+    INGRESS_URL     = os.environ.get("INGRESS_URL",     "http://ingress.edp-processing.svc.cluster.local:3000")
     SMART_PROXY_URL = os.environ.get("SMART_PROXY_URL", "http://smart-proxy.edp-processing.svc.cluster.local:8080")
-    THANOS_URL    = os.environ.get("THANOS_URL",     "http://observability-thanos-query.open-cluster-management-observability.svc.cluster.local:9090")
+    THANOS_URL      = os.environ.get("THANOS_URL",      "https://rbac-query-proxy.open-cluster-management-observability.svc.cluster.local:8443")
+    SA_TOKEN_PATH   = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+    SA_CA_PATH      = "/var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt"
+
+    def get_sa_token() -> str:
+        try:
+            return open(SA_TOKEN_PATH).read().strip()
+        except Exception:
+            return ""
 
     # {"identity":{"type":"User","account_number":"0000001","org_id":"000001","internal":{"org_id":"000001"}}}
     RH_IDENTITY = "eyJpZGVudGl0eSI6IHsidHlwZSI6ICJVc2VyIiwgImFjY291bnRfbnVtYmVyIjogIjAwMDAwMDEiLCAib3JnX2lkIjogIjAwMDAwMSIsICJpbnRlcm5hbCI6IHsib3JnX2lkIjogIjAwMDAwMSJ9fX0="
@@ -89,9 +100,8 @@ data:
             params["query"] = rewrite_promql(original)
             if params["query"] != original:
                 logger.debug("Rewrote PromQL: %s -> %s", original, params["query"])
-        headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")}
-        headers["x-rh-identity"] = RH_IDENTITY
-        async with httpx.AsyncClient() as client:
+        headers = {"Authorization": f"Bearer {get_sa_token()}"}
+        async with httpx.AsyncClient(verify=SA_CA_PATH) as client:
             resp = await client.request(
                 method=request.method,
                 url=f"{THANOS_URL}/{path}",
@@ -133,6 +143,7 @@ spec:
       labels:
         app: identity-injector
     spec:
+      serviceAccountName: identity-injector-sa
       containers:
         - name: identity-injector
           image: registry.access.redhat.com/ubi9/python-311:latest
@@ -151,7 +162,7 @@ spec:
             - name: SMART_PROXY_URL
               value: "http://smart-proxy.edp-processing.svc.cluster.local:8080"
             - name: THANOS_URL
-              value: "http://observability-thanos-query.open-cluster-management-observability.svc.cluster.local:9090"
+              value: "https://rbac-query-proxy.open-cluster-management-observability.svc.cluster.local:8443"
           volumeMounts:
             - name: config
               mountPath: /app/proxy.py
