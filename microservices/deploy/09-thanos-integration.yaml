@@ -1,0 +1,22 @@
+---
+# ServiceAccount for identity-injector to access MCO Thanos via rbac-query-proxy
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: identity-injector-sa
+  namespace: edp-processing
+
+---
+# cluster-reader gives access to query through rbac-query-proxy
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: identity-injector-cluster-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-reader
+subjects:
+  - kind: ServiceAccount
+    name: identity-injector-sa
+    namespace: edp-processing
