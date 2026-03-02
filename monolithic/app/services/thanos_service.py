@@ -1,4 +1,5 @@
-"""Service for querying Thanos/Prometheus metrics via rbac-query-proxy."""
+"""Service for querying Thanos (deployed by Multicluster Observability Operator)
+metrics via rbac-query-proxy."""
 import logging
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
@@ -16,7 +17,7 @@ SA_CA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt"
 
 @dataclass
 class Alert:
-    """Alert extracted from Prometheus metrics."""
+    """Alert extracted from Thanos metrics."""
 
     name: str
     namespace: Optional[str] = None
@@ -25,7 +26,7 @@ class Alert:
 
 @dataclass
 class OperatorCondition:
-    """Failing operator condition extracted from Prometheus metrics."""
+    """Operator condition extracted from Thanos metrics."""
 
     name: str
     condition: str
@@ -33,7 +34,7 @@ class OperatorCondition:
 
 
 class ThanosService:
-    """Queries Thanos for cluster health metrics."""
+    """Queries Thanos in ACM for cluster health metrics."""
 
     def __init__(self, config: AppConfig):
         self.thanos_url = config.thanos_url
@@ -45,6 +46,13 @@ class ThanosService:
             return f.read().strip()
 
     def _build_query(self, cluster_id: str) -> str:
+        """
+        Builds a query for retrieving alert and operator conditions data.
+        The query is slightly different from the one used in c.r.c.
+        due to differences between Thanos (queried here) and RHOBS.
+
+        :return: query string for Thanos
+        """
         return (
             f'console_url{{clusterID=~"{cluster_id}"}}'
             " or "
@@ -58,6 +66,11 @@ class ThanosService:
     def _parse_response(
         self, data: dict
     ) -> Tuple[str, List[Alert], List[OperatorCondition]]:
+        """
+        Parse raw response from Thanos API.
+
+        :return: console_url, alerts, operator_conditions
+        """
         console_url = ""
         alerts: List[Alert] = []
         operator_conditions: List[OperatorCondition] = []
@@ -103,9 +116,10 @@ class ThanosService:
     def query_cluster_metrics(
         self, cluster_id: str
     ) -> Tuple[str, List[Alert], List[OperatorCondition]]:
-        """Query Thanos for alerts and operator conditions for a cluster.
+        """
+        Query Thanos for alerts and operator conditions for a cluster.
 
-        Returns (console_url, alerts, operator_conditions).
+        :return: console_url, alerts, operator_conditions
         """
         query = self._build_query(cluster_id)
         logger.info(query)

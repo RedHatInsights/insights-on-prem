@@ -32,9 +32,19 @@ EXCLUDE_NAMESPACES = [
 
 
 class UpgradePredictionService:
-    """Static rule-based predictor for upgrade risks."""
+    """
+    Service predicting cluster upgrade risk based on Thanos data
+    about alerts and failing operator conditions. The service
+    mimics the logic of upgrades-inference service used in data
+    processing pipeline in c.r.c.
+    """
 
     def _filter_alert(self, alert: Alert) -> bool:
+        """
+        Filters alerts only to critical and excludes certain namespaces.
+
+        :return: true if alert should be included and false otherwise
+        """
         if alert.namespace is None:
             return False
         return (
@@ -44,9 +54,19 @@ class UpgradePredictionService:
         )
 
     def _filter_foc(self, foc: OperatorCondition) -> bool:
+        """
+        Filters operator conditions only to those that failed.
+
+        :return: true if conditon should be included and false otherwise
+        """
         return foc.condition in ["Not Available", "Degraded"]
 
     def _build_alert_url(self, console_url: str, alert_name: str) -> str:
+        """
+        Create an URL for each alert in the response.
+
+        :return: full URL leading to alert details 
+        """
         if not console_url or not alert_name:
             return ""
         return urljoin(
@@ -55,6 +75,11 @@ class UpgradePredictionService:
         )
 
     def _build_foc_url(self, console_url: str, operator_name: str) -> str:
+        """
+        Create an URL for each failing operator condition in the response.
+
+        :return: full URL leading to FOC details 
+        """
         if not console_url or not operator_name:
             return ""
         return urljoin(
@@ -68,7 +93,11 @@ class UpgradePredictionService:
         operator_conditions: List[OperatorCondition],
         console_url: str,
     ) -> UpgradeRisksPredictionResponse:
-        """Filter alerts and FOCs to identify actual upgrade risks."""
+        """
+        Filter alerts and FOCs to identify actual upgrade risks.
+        
+        :return: response object with prediction
+        """
         filtered_alerts = [a for a in alerts if self._filter_alert(a)]
         filtered_focs = [f for f in operator_conditions if self._filter_foc(f)]
 
