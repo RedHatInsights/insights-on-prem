@@ -84,32 +84,31 @@ class ThanosService:
 
             name = metric.get("__name__")
 
-            if name == "console_url":
-                url = metric.get("url")
-                if url:
-                    console_url = url
-
-            elif name == "ALERTS":
-                alerts.append(
-                    Alert(
-                        name=metric.get("alertname", ""),
-                        namespace=metric.get("namespace"),
-                        severity=metric.get("severity", ""),
+            match name:  
+                case "console_url":
+                    url = metric.get("url")
+                    if url:
+                        console_url = url
+                case "ALERTS":
+                    alerts.append(
+                        Alert(
+                            name=metric.get("alertname", ""),
+                            namespace=metric.get("namespace"),
+                            severity=metric.get("severity", ""),
+                        )
                     )
-                )
+                case "cluster_operator_conditions":
+                    condition = metric.get("condition", "")
+                    if condition == "Available":
+                        condition = "Not Available"
 
-            elif name == "cluster_operator_conditions":
-                condition = metric.get("condition", "")
-                if condition == "Available":
-                    condition = "Not Available"
-
-                operator_conditions.append(
-                    OperatorCondition(
-                        name=metric.get("name", ""),
-                        condition=condition,
-                        reason=metric.get("reason"),
+                    operator_conditions.append(
+                        OperatorCondition(
+                            name=metric.get("name", ""),
+                            condition=condition,
+                            reason=metric.get("reason"),
+                        )
                     )
-                )
 
         return console_url, alerts, operator_conditions
 

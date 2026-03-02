@@ -55,7 +55,7 @@ class UpgradePredictionService:
 
     def _filter_foc(self, foc: OperatorCondition) -> bool:
         """
-        Filters operator conditions only to those that failed.
+        Filters operator conditions only to those that degraded or unavailable.
 
         :return: true if conditon should be included and false otherwise
         """
