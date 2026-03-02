@@ -25,6 +25,8 @@ class AppConfig:
     unpacked_archive_size_limit: int = -1
 
     thanos_url: str = "https://rbac-query-proxy.open-cluster-management-observability.svc.cluster.local:8443"
+    thanos_token_path: str = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+    thanos_sa_cert_path: str = "/var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt"
     thanos_query_timeout: int = 10
     thanos_query_lookback_minutes: int = 60
 
@@ -50,6 +52,8 @@ _ENV_OVERRIDES = {
     "MAX_FILE_SIZE": ("max_file_size", int),
     "TEMP_UPLOAD_DIR": ("temp_upload_dir", str),
     "THANOS_URL": ("thanos_url", str),
+    "THANOS_TOKEN_PATH": ("thanos_token_path", str),
+    "THANOS_SA_CERT_PATH": ("thanos_sa_cert_path", str),
     "THANOS_QUERY_TIMEOUT": ("thanos_query_timeout", int),
     "THANOS_QUERY_LOOKBACK_MINUTES": ("thanos_query_lookback_minutes", int),
 }

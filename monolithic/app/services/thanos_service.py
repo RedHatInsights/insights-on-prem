@@ -11,9 +11,6 @@ from app.config import AppConfig
 
 logger = logging.getLogger(__name__)
 
-SA_TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
-SA_CA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt"
-
 
 @dataclass
 class Alert:
@@ -40,9 +37,11 @@ class ThanosService:
         self.thanos_url = config.thanos_url
         self.timeout = config.thanos_query_timeout
         self.lookback_minutes = config.thanos_query_lookback_minutes
+        self.sa_cert_path = config.thanos_sa_cert_path
+        self.token_path = config.thanos_token_path
 
     def _get_bearer_token(self) -> str:
-        with open(SA_TOKEN_PATH) as f:
+        with open(self.token_path) as f:
             return f.read().strip()
 
     def _build_query(self, cluster_id: str) -> str:
@@ -132,7 +131,7 @@ class ThanosService:
             f"{self.thanos_url}/api/v1/query",
             params={"query": query, "time": query_time},
             headers={"Authorization": f"Bearer {token}"},
-            verify=SA_CA_PATH,
+            verify=self.sa_cert_path,
             timeout=self.timeout,
         )
         response.raise_for_status()
