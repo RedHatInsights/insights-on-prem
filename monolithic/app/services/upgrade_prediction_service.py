@@ -78,22 +78,22 @@ class UpgradePredictionService:
 
         alert_responses = [
             AlertResponse(
-                name=a.name,
-                namespace=a.namespace,
-                severity=a.severity,
-                url=self._build_alert_url(console_url, a.name) or None,
+                name=alert.name,
+                namespace=alert.namespace,
+                severity=alert.severity,
+                url=self._build_alert_url(console_url, alert.name) or None,
             )
-            for a in filtered_alerts
+            for alert in filtered_alerts
         ]
 
         foc_responses = [
             OperatorConditionResponse(
-                name=f.name,
-                condition=f.condition,
-                reason=f.reason,
-                url=self._build_foc_url(console_url, f.name) or None,
+                name=foc.name,
+                condition=foc.condition,
+                reason=foc.reason,
+                url=self._build_foc_url(console_url, foc.name) or None,
             )
-            for f in filtered_focs
+            for foc in filtered_focs
         ]
 
         upgrade_recommended = len(alert_responses) == 0 and len(foc_responses) == 0
