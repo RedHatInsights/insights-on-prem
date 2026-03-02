@@ -11,6 +11,16 @@ from app.config import AppConfig
 
 logger = logging.getLogger(__name__)
 
+_CLUSTER_METRICS_QUERY_TEMPLATE = (
+    'console_url{{clusterID=~"{cluster_id}"}}'
+    " or "
+    'ALERTS{{clusterID=~"{cluster_id}", namespace=~"openshift-.*", severity=~"warning|critical"}}'
+    " or "
+    'cluster_operator_conditions{{clusterID=~"{cluster_id}", condition="Available"}} == 0'
+    " or "
+    'cluster_operator_conditions{{clusterID=~"{cluster_id}", condition="Degraded"}} == 1'
+)
+
 
 @dataclass
 class Alert:
@@ -52,15 +62,7 @@ class ThanosService:
 
         :return: query string for Thanos
         """
-        return (
-            f'console_url{{clusterID=~"{cluster_id}"}}'
-            " or "
-            f'ALERTS{{clusterID=~"{cluster_id}", namespace=~"openshift-.*", severity=~"warning|critical"}}'
-            " or "
-            f'cluster_operator_conditions{{clusterID=~"{cluster_id}", condition="Available"}} == 0'
-            " or "
-            f'cluster_operator_conditions{{clusterID=~"{cluster_id}", condition="Degraded"}} == 1'
-        )
+        return _CLUSTER_METRICS_QUERY_TEMPLATE.format(cluster_id=cluster_id)
 
     def _parse_response(
         self, data: dict
