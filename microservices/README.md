@@ -55,7 +55,7 @@ The identity-injector acts like 3scale in production - it adds authentication he
 3. Query is forwarded to MCO Thanos (observability-thanos-query) with real cluster metrics
 4. ccx-upgrades-inference scores the results and returns upgrade risk predictions
 
-MCO (MultiCluster Observability) is required for upgrade risk predictions and must be pre-installed on the cluster.
+MCO (MultiCluster Observability) is required for upgrade risk predictions and must be pre-installed on the cluster. `09-thanos-integration.yaml` creates the `identity-injector-sa` ServiceAccount with `cluster-reader` access to query MCO Thanos via `rbac-query-proxy` — this must be applied before `08-identity-injector.yaml`.
 
 ## Quick Start
 
@@ -190,8 +190,13 @@ oc apply -f deploy/07-upgrades.yaml
 # Wait for services to be ready
 oc wait --for=condition=ready pod -l app=ingress -n edp-processing --timeout=300s
 oc wait --for=condition=ready pod -l app=smart-proxy -n edp-processing --timeout=300s
+oc wait --for=condition=ready pod -l app=ccx-upgrades-data-eng -n edp-processing --timeout=300s
 
-# Deploy identity-injector (requires smart-proxy to exist first)
+# Set up ServiceAccount for identity-injector to access MCO Thanos
+# (requires MCO to be pre-installed on the cluster)
+oc apply -f deploy/09-thanos-integration.yaml
+
+# Deploy identity-injector (requires smart-proxy and 09-thanos-integration.yaml first)
 oc apply -f deploy/08-identity-injector.yaml
 
 # Wait for identity-injector to be ready
@@ -246,7 +251,7 @@ strimzi-cluster-operator-6c84667cb8-2n9f9    1/1     Running   0          5m59s
 
 ### Expose Services
 
-To test the data pipeline, expose the ingress and aggregator services:
+To test the data pipeline, expose the services:
 
 ```bash
 # Expose ingress for archive uploads
@@ -255,16 +260,16 @@ oc create route edge ingress \
   --port=3000 \
   -n edp-processing
 
-# Expose aggregator for querying results
-oc create route edge aggregator \
-  --service=aggregator \
-  --port=8082 \
-  -n edp-processing
-
-# Expose smart-proxy
+# Expose smart-proxy for querying results
 oc create route edge smart-proxy \
   --service=smart-proxy \
   --port=8080 \
+  -n edp-processing
+
+# Expose content-service
+oc create route edge content-service \
+  --service=content-service \
+  --port=8081 \
   -n edp-processing
 ```
 
@@ -309,10 +314,11 @@ This option configures the insights pipeline to use your local EDP stack instead
 
 The deployment uses two key components for authentication:
 
-**Identity-Injector** (Nginx proxy):
+**Identity-Injector** (Python FastAPI proxy):
 - Receives requests from insights-operator and insights-client
 - Adds `x-rh-identity` header with test credentials (org_id: 000001, account: 0000001)
-- Routes uploads to ingress and queries to smart-proxy
+- Routes uploads to ingress, queries to smart-proxy, and metrics to MCO Thanos
+- Rewrites RHOBS metric conventions to MCO conventions for upgrade risk predictions
 - Acts like 3scale in production environments
 
 **Ingress** (`quay.io/cloudservices/insights-ingress:latest`):
@@ -339,6 +345,7 @@ type: Opaque
 stringData:
   endpoint: "http://identity-injector.edp-processing.svc.cluster.local:8080/api/ingress/v1/upload"
   insights-url: "http://identity-injector.edp-processing.svc.cluster.local:8080/api/v2"
+  reportEndpoint: "http://identity-injector.edp-processing.svc.cluster.local:8080/api/v2/cluster/%s/reports"
 EOF
 
 # Restart insights-operator to pick up the new configuration
@@ -578,29 +585,24 @@ The credentials are configured during Step 3 of the deployment process.
 
 ## Cleanup
 
-To remove the entire EDP stack:
+To remove the entire EDP stack use the script:
 
 ```bash
-# Delete application services
-oc delete -f deploy/08-identity-injector.yaml
-oc delete -f deploy/07-upgrades.yaml
-oc delete -f deploy/06-api-services.yaml
-oc delete -f deploy/05-writers.yaml
-oc delete -f deploy/04-ingestion.yaml
+./edp.sh cleanup
+```
 
-# Delete infrastructure
-oc delete -f deploy/02-infrastructure.yaml
+Or manually:
 
-# Delete secrets
-oc delete -f deploy/01-secrets.yaml
+```bash
+# Restore insights-operator to default
+oc delete secret support -n openshift-config
+oc delete pod -n openshift-insights -l app=insights-operator
 
-# Delete Kafka
-oc delete -f deploy/03-kafka-strimzi.yaml
+# Delete cluster-scoped resources
+oc delete clusterrolebinding identity-injector-cluster-reader
 
-# Delete namespace
-oc delete -f deploy/00-namespace.yaml
-
-# Delete Kafka namespace
+# Delete namespaces (all resources within are deleted automatically)
+oc delete namespace edp-processing
 oc delete namespace kafka
 ```
 
