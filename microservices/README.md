@@ -55,7 +55,7 @@ The identity-injector acts like 3scale in production - it adds authentication he
 3. Query is forwarded to MCO Thanos (observability-thanos-query) with real cluster metrics
 4. ccx-upgrades-inference scores the results and returns upgrade risk predictions
 
-MCO (MultiCluster Observability) is required for upgrade risk predictions and must be pre-installed on the cluster.
+MCO (MultiCluster Observability) is required for upgrade risk predictions and must be pre-installed on the cluster. `09-thanos-integration.yaml` creates the `identity-injector-sa` ServiceAccount with `cluster-reader` access to query MCO Thanos via `rbac-query-proxy` — this must be applied before `08-identity-injector.yaml`.
 
 ## Quick Start
 
@@ -191,7 +191,11 @@ oc apply -f deploy/07-upgrades.yaml
 oc wait --for=condition=ready pod -l app=ingress -n edp-processing --timeout=300s
 oc wait --for=condition=ready pod -l app=smart-proxy -n edp-processing --timeout=300s
 
-# Deploy identity-injector (requires smart-proxy to exist first)
+# Set up ServiceAccount for identity-injector to access MCO Thanos
+# (requires MCO to be pre-installed on the cluster)
+oc apply -f deploy/09-thanos-integration.yaml
+
+# Deploy identity-injector (requires smart-proxy and 09-thanos-integration.yaml first)
 oc apply -f deploy/08-identity-injector.yaml
 
 # Wait for identity-injector to be ready
