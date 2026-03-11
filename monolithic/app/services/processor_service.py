@@ -50,7 +50,7 @@ class ProcessorService:
         self.target_components = dr.toposort_flatten(self.components_dict, sort=False)
 
         # Extraction settings
-        self.extract_timeout = config.extract_timeout
+        self.extract_timeout_seconds = config.extract_timeout_seconds
         self.extract_tmp_dir = config.temp_upload_dir
         self.unpacked_archive_size_limit = config.unpacked_archive_size_limit
 
@@ -135,7 +135,7 @@ class ProcessorService:
             # Use insights.core.archives.extract()
             with extract(
                 archive_path,
-                timeout=self.extract_timeout,
+                timeout=self.extract_timeout_seconds,
                 extract_dir=self.extract_tmp_dir,
             ) as extraction:
                 # Validate size

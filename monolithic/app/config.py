@@ -19,10 +19,16 @@ class AppConfig:
     postgres_password: str = "insights"
     max_file_size: int = 104857600
     temp_upload_dir: str = "/tmp/insights-uploads"
-    extract_timeout: int = 300
+    extract_timeout_seconds: int = 300
     format: str = "insights.formats._json.JsonFormat"
     target_components: List[str] = field(default_factory=list)
     unpacked_archive_size_limit: int = -1
+
+    thanos_url: str = "https://rbac-query-proxy.open-cluster-management-observability.svc.cluster.local:8443"
+    thanos_token_path: str = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+    thanos_sa_cert_path: str = "/var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt"
+    thanos_query_timeout_seconds: int = 10
+    thanos_query_lookback_minutes: int = 60
 
     plugin_packages: List[str] = field(default_factory=list)
     plugin_configs: List[dict] = field(default_factory=list)
@@ -45,6 +51,11 @@ _ENV_OVERRIDES = {
     "POSTGRES_PASSWORD": ("postgres_password", str),
     "MAX_FILE_SIZE": ("max_file_size", int),
     "TEMP_UPLOAD_DIR": ("temp_upload_dir", str),
+    "THANOS_URL": ("thanos_url", str),
+    "THANOS_TOKEN_PATH": ("thanos_token_path", str),
+    "THANOS_SA_CERT_PATH": ("thanos_sa_cert_path", str),
+    "THANOS_QUERY_TIMEOUT_SECONDS": ("thanos_query_timeout_seconds", int),
+    "THANOS_QUERY_LOOKBACK_MINUTES": ("thanos_query_lookback_minutes", int),
 }
 
 

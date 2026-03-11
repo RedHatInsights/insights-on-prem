@@ -18,6 +18,11 @@ service:
   # Maximum unpacked archive size (-1 for unlimited)
   unpacked_archive_size_limit: -1
 
+  # Thanos configuration
+  thanos_url: https://rbac-query-proxy.open-cluster-management-observability.svc.cluster.local:8443
+  thanos_query_timeout: 10
+  thanos_query_lookback_minutes: 60
+
 plugins:
   packages:
     - ccx_rules_ocp.external

@@ -10,6 +10,7 @@ spec:
       labels:
         app: insights-on-prem 
     spec:
+      serviceAccountName: insights-on-prem
       containers:
       - name: insights-on-prem
         image: quay.io/ccxdev/insights-on-premise-poc:latest
