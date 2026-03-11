@@ -45,7 +45,7 @@ class ThanosService:
 
     def __init__(self, config: AppConfig):
         self.thanos_url = config.thanos_url
-        self.timeout = config.thanos_query_timeout
+        self.timeout_seconds = config.thanos_query_timeout_seconds
         self.lookback_minutes = config.thanos_query_lookback_minutes
         self.sa_cert_path = config.thanos_sa_cert_path
         self.token_path = config.thanos_token_path
@@ -134,7 +134,7 @@ class ThanosService:
             params={"query": query, "time": query_time},
             headers={"Authorization": f"Bearer {token}"},
             verify=self.sa_cert_path,
-            timeout=self.timeout,
+            timeout=self.timeout_seconds,
         )
         response.raise_for_status()
 
