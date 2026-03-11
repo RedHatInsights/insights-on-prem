@@ -71,7 +71,7 @@ class UpgradePredictionService:
             return ""
         return urljoin(
             console_url,
-            f"/monitoring/alerts?orderBy=asc&sortBy=Severity&alert-name={alert_name}",
+            f"/monitoring/alerts?name={alert_name}",
         )
 
     def _build_foc_url(self, console_url: str, operator_name: str) -> str:
