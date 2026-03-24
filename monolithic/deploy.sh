@@ -35,11 +35,9 @@ oc annotate multiclusterhub multiclusterhub -n open-cluster-management mch-pause
 
 echo "9. Configuring ACM insights-client..."
 # Update the CCX_SERVER environment variable to point to on-premise service
+# Also, set insights-client poll interval to 1 minute for demo purposes
 oc set env deployment/insights-client -n open-cluster-management \
-  CCX_SERVER=http://insights-on-prem.insights-on-prem-poc.svc.cluster.local:8000/api/v2
-
-# Set insights-client poll interval to 1 minute for demo purposes
-oc set env deployment/insights-client -n open-cluster-management \
+  CCX_SERVER=http://insights-on-prem.insights-on-prem-poc.svc.cluster.local:8000/api/v2 \
   POLL_INTERVAL=1
 
 echo "10. Waiting for deployment to roll out..."
