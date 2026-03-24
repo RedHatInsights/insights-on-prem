@@ -1,0 +1,23 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: insights-test-alerts
+  namespace: openshift-monitoring
+  labels:
+    openshift.io/prometheus-rule-evaluation-scope: leaf-prometheus
+spec:
+  groups:
+  - name: insights-test
+    rules:
+    - alert: InsightsTestCriticalAlertOne
+      expr: vector(1)
+      for: 0m
+      labels:
+        severity: critical
+        namespace: openshift-monitoring
+    - alert: InsightsTestCriticalAlertTwo
+      expr: vector(1)
+      for: 0m
+      labels:
+        severity: critical
+        namespace: openshift-monitoring

@@ -150,6 +150,46 @@ The command should trigger [webhook_timeout_is_larger_than_default](https://gitl
 oc get policyreport --all-namespaces
 ```
 
+## Viewing Results in the ACM Fleet Overview UI
+
+The results of the on-premise pipeline are visible in the ACM fleet overview at:
+
+```
+https://<your-cluster-api-server>/multicloud/home/overview
+```
+
+![ACM Fleet Overview - Insights section showing all four panels populated from the on-premise pipeline](docs/fleet-overview-ui.png)
+
+The Insights section of that page has four panels. Here is what backs each one and what is needed for it to show data:
+
+### Cluster recommendations
+
+**Source:** `PolicyReport` custom resources created by `insights-client` in each managed cluster's namespace.
+
+**Extra setup:** N/A, triggerred recommendations are shown in UI
+
+### Update risk predictions
+
+**Source:** The ACM console backend has a `/upgrade-risks-prediction` route that is hardcoded to forward to `https://console.redhat.com/api/insights-results-aggregator/v2/upgrade-risks-prediction` (see [line 55 of `upgrade-risks-prediction.ts`](https://github.com/stolostron/console/blob/25e89cf074e27ef24bc850778123e281a767d9ab/backend/src/routes/upgrade-risks-prediction.ts#L55)). There is no equivalent of `CCX_SERVER` for this endpoint — the URL is not configurable so we need a patch for now.
+
+**Why patching is needed:** Because the URL is hardcoded, the on-prem pipeline cannot receive URP requests without modifying the console backend. `test_ui.sh` works around this by copying `backend.mjs` from the running console pod, replacing the `upgradeRiskPredictions` function to call the on-prem service instead, and mounting the patched file via a ConfigMap. The long-term fix is a PR to `stolostron/console` to make the URL configurable via an environment variable (e.g. `UPGRADE_RISKS_PREDICTION_URL`), which a future ACM addon can then set — the same pattern used for `CCX_SERVER`.
+
+### Alerts
+
+**Source:** Thanos directly, via MCO. The ACM console reads `ALERTS` metrics from Thanos and displays raw alert counts. No on-prem involvement — this section works automatically once MCO is deployed.
+
+### Failing operators
+
+**Source:** Thanos directly, via MCO. The ACM console reads `cluster_operator_conditions` metrics from Thanos. No on-prem involvement.
+
+### Testing all four panels
+
+Run `test_ui.sh` after `deploy.sh` to set up test data that triggers all four sections and verifies the data is flowing through the on-prem service (not `console.redhat.com`):
+
+```bash
+./test_ui.sh
+```
+
 ## Database Access
 
 The application uses ACM's existing `search-postgres` database. This serves as temporary solution until we get provided with shared DB from ACM, or we find a our own solution.
