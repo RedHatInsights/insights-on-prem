@@ -113,8 +113,23 @@ oc logs -f deployment/insights-on-prem -n insights-on-prem-poc
 - **MultiClusterHub operator is paused** after deployment (annotation `mch-pause=true`) to prevent it from reverting the `CCX_SERVER` configuration.
 - To unpause the operator:
   ```bash
-  oc annotate multiclusterhub multiclusterhub -n open-cluster-management mch-pause-
+  oc annotate multiclusterhub multiclusterhub -n open-cluster-management mch-pause=false --overwrite
   ```
+
+## How to trigger an Insights recommendation
+
+To trigger creation of an Insights recommendation, and the creation of the corresponing `PolicyReport` custom resource by an Insights Client,
+at least one of the rule conditions has to be met. The easiest way to achieve that is by running the following command:
+
+```bash
+oc patch machineconfigpool worker --type merge -p '{"spec":{"paused":true}}'
+```
+
+The command should trigger [mcp_set_to_pause](https://gitlab.cee.redhat.com/ccx/ccx-rules-ocp/-/blob/master/ccx_rules_ocp/external/rules/mcp_set_to_pause.py) rule. Depending on the frequency of archive uploads from Insights Operator (in `deploy.sh` script set to 1 minute for PoC purposes, but default value is 2 hours), the recommendation and the `PolicyReport` should be created. You can check that with this command directly in the ACM cluster:
+
+```bash
+oc get policyreport --all-namespaces
+```
 
 ## Database Access
 
