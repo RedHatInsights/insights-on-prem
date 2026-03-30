@@ -38,10 +38,6 @@ No pause needed.
 component. This is a shared database and not a long-term solution — the addon should
 eventually provision its own PostgreSQL instance.
 
-**Route**: The HTTPS route in `04-addon-template.yaml` is required because the ACM console
-backend enforces HTTPS for outbound calls. In a production addon this would be handled
-more robustly (e.g. via a proper Service mesh or internal CA).
-
 ## Install
 
 ```bash
