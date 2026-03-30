@@ -1,3 +1,9 @@
+# ValidatingWebhookConfiguration that triggers the webhook_timeout_is_larger_than_default (13 seconds)
+# insights-core rule, causing a cluster recommendation to appear in the ACM fleet view.
+# Rule: https://gitlab.cee.redhat.com/ccx/ccx-rules-ocp/-/blob/master/ccx_rules_ocp/external/rules/webhook_timeout_is_larger_than_default.py
+#
+# This approach works on all cluster types including ROSA (unlike MachineConfigPool-based
+# triggers which only work on OCP clusters with MCP).
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:

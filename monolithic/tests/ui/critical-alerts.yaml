@@ -1,3 +1,10 @@
+# PrometheusRule that fires two always-on critical alerts for URP testing.
+#
+# Two critical alerts in an openshift-* namespace are required because
+# upgrade_prediction_service.py filters to >= 2 critical alerts before flagging
+# a cluster as at risk. The unique alert names (InsightsTestCriticalAlert*) are
+# also used by test_ui.sh to verify data is coming from local Thanos and not
+# console.redhat.com.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
