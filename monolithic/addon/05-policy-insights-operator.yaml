@@ -1,7 +1,0 @@
-# NOTE: insights-config ConfigMap is now handled directly in 04-addon-template.yaml
-# via the AddOnTemplate ManifestWork mechanism, which doesn't have the
-# hub-cluster namespace mismatch issue that affects ConfigurationPolicy propagation.
-#
-# This file is kept as documentation of what was attempted with the Policy approach.
-# The insights-operator ConfigMap redirect is applied by the ManifestWork created
-# from the AddOnTemplate when the addon is installed.
