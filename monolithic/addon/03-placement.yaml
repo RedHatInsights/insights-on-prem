@@ -1,0 +1,17 @@
+# Targets the hub cluster (local-cluster) only — the on-prem service runs on hub.
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: insights-on-prem-placement
+  namespace: insights-on-prem
+spec:
+  clusterSets:
+    - global
+  tolerations:
+    - key: cluster.open-cluster-management.io/unreachable
+    - key: cluster.open-cluster-management.io/unavailable
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            local-cluster: "true"

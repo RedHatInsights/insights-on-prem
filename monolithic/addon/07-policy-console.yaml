@@ -1,0 +1,45 @@
+# ConfigurationPolicy applied directly to the cluster namespace the governance agent watches.
+# See 06-policy-insights-client.yaml for explanation of the direct namespace approach.
+#
+# Deploys custom console image (quay.io/ccxdev/insights-on-prem-lsolarov-console:latest)
+# that adds UPGRADE_RISKS_PREDICTION_URL env var support — pending upstream in CCXDEV-16237.
+# Once merged into stolostron/console this can drop the image override and keep only the env var.
+#
+# Uses ACM hub template to derive the route hostname dynamically.
+apiVersion: policy.open-cluster-management.io/v1
+kind: ConfigurationPolicy
+metadata:
+  name: insights-on-prem-console-config
+  namespace: lsolraov-cluster  # the namespace the governance agent watches on this hub
+spec:
+  remediationAction: enforce
+  severity: medium
+  object-templates-raw: |
+    - complianceType: MustHave
+      objectDefinition:
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: ccxdev-insights-on-prem-poc-pull-secret
+          namespace: open-cluster-management
+        type: kubernetes.io/dockerconfigjson
+        data: '{{ (lookup "v1" "Secret" "insights-on-prem-poc" "ccxdev-insights-on-prem-poc-pull-secret").data | toJson }}'
+    - complianceType: MustHave
+      objectDefinition:
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: console-chart-console-v2
+          namespace: open-cluster-management
+        spec:
+          template:
+            spec:
+              imagePullSecrets:
+                - name: ccxdev-insights-on-prem-poc-pull-secret
+              containers:
+                - name: console
+                  image: quay.io/ccxdev/insights-on-prem-lsolarov-console:latest
+                  imagePullPolicy: Always
+                  env:
+                    - name: UPGRADE_RISKS_PREDICTION_URL
+                      value: 'https://insights-on-prem-insights-on-prem-poc.{{ (lookup "config.openshift.io/v1" "Ingress" "" "cluster").spec.domain }}/api/insights-results-aggregator/v2/upgrade-risks-prediction'

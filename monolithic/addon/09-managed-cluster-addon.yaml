@@ -1,0 +1,9 @@
+# Enables the addon on local-cluster (the hub).
+# ACM requires this to exist for the AddOnTemplate to be instantiated.
+apiVersion: addon.open-cluster-management.io/v1alpha1
+kind: ManagedClusterAddOn
+metadata:
+  name: insights-on-prem
+  namespace: local-cluster
+spec:
+  installNamespace: insights-on-prem-poc

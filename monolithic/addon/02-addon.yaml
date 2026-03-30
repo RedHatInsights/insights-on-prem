@@ -1,0 +1,24 @@
+apiVersion: addon.open-cluster-management.io/v1alpha1
+kind: ClusterManagementAddOn
+metadata:
+  name: insights-on-prem
+  annotations:
+    addon.open-cluster-management.io/lifecycle: "addon-manager"
+spec:
+  addOnMeta:
+    description: Deploys the Insights on-premise pipeline on the hub cluster
+    displayName: Insights On-Premise
+  supportedConfigs:
+    - group: addon.open-cluster-management.io
+      resource: addontemplates
+      defaultConfig:
+        name: insights-on-prem
+  installStrategy:
+    type: Placements
+    placements:
+      - name: insights-on-prem-placement
+        namespace: insights-on-prem
+        configs:
+          - group: addon.open-cluster-management.io
+            resource: addontemplates
+            name: insights-on-prem

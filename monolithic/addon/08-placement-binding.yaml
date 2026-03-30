@@ -1,0 +1,20 @@
+# Binds all three policies to the placement so they are enforced on local-cluster.
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: insights-on-prem-binding
+  namespace: insights-on-prem
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: insights-on-prem-placement
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: insights-on-prem-operator-config
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: insights-on-prem-client-config
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: insights-on-prem-console-config
