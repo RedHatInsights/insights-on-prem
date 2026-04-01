@@ -21,7 +21,8 @@ dynamic operations that can't be expressed as static manifests:
 | `01-namespace.yaml` | Namespace for addon resources + `ManagedClusterSetBinding` |
 | `02-addon.yaml` | `ClusterManagementAddOn` — registers the addon in ACM |
 | `03-placement.yaml` | Targets `local-cluster` (hub) only |
-| `04-addon-template.yaml` | Everything: on-prem pod, service, RBAC, `insights-config`, configure Job |
+| `04-addon-template.yaml` | Static manifests: on-prem pod, service, RBAC, `insights-config` ConfigMap |
+| `05-configure-job.yaml` | One-time Job that copies secrets, creates the HTTPS route, and configures ACM at install time |
 | *(auto-created by addon-manager)* | `ManagedClusterAddOn` for `local-cluster` — created automatically based on the placement |
 
 ## Prerequisites
