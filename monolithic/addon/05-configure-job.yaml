@@ -1,0 +1,79 @@
+# One-time configure Job that handles all dynamic setup at install time.
+# Applies directly to the hub cluster (not via ManifestWork/AddOnTemplate) so
+# it runs immediately when oc apply -f addon/ is executed.
+#
+# TODO: most steps here are temporary — see 04-addon-template.yaml for details.
+apiVersion: batch/v1
+  kind: Job
+  metadata:
+    name: insights-on-prem-configure
+    namespace: insights-on-prem-poc
+  spec:
+    template:
+      spec:
+        serviceAccountName: insights-on-prem
+        restartPolicy: OnFailure
+        containers:
+          - name: configure
+            image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+            command:
+              - /bin/bash
+              - -c
+              - |
+                set -e
+
+                echo "Waiting for RBAC to be ready..."
+                until oc auth can-i create routes -n insights-on-prem-poc 2>/dev/null; do
+                  echo "  waiting for route create permission..."
+                  sleep 5
+                done
+
+                # Detect the actual klusterlet cluster name.
+                # On clusters that are both a hub AND a spoke of another hub,
+                # the klusterlet may be registered with a different name than "local-cluster".
+                KLUSTERLET_NS=$(oc get klusterlet klusterlet -o jsonpath='{.spec.clusterName}' 2>/dev/null || echo "local-cluster")
+                echo "Klusterlet cluster namespace: ${KLUSTERLET_NS}"
+                if [ "${KLUSTERLET_NS}" != "local-cluster" ]; then
+                  echo "WARNING: klusterlet (${KLUSTERLET_NS}) != local-cluster. ManifestWork targets local-cluster but agent watches ${KLUSTERLET_NS}. Job-based config below will still apply correctly."
+                fi
+
+                                        echo "Copying search-postgres secret..."
+                oc get secret search-postgres -n open-cluster-management -o json | \
+                  python3 -c "import sys,json; d=json.load(sys.stdin); d['metadata']={'name':'search-postgres','namespace':'insights-on-prem-poc'}; print(json.dumps(d))" | \
+                  oc apply -f -
+
+                echo "Creating HTTPS route..."
+                oc create route edge insights-on-prem \
+                  --service=insights-on-prem \
+                  --port=8000 \
+                  --insecure-policy=Redirect \
+                  -n insights-on-prem-poc 2>/dev/null || true
+                ROUTE_HOST=$(oc get route insights-on-prem -n insights-on-prem-poc -o jsonpath='{.spec.host}')
+
+                echo "Pausing MCH to prevent CCX_SERVER revert..."
+                oc annotate multiclusterhub multiclusterhub \
+                  -n open-cluster-management mch-pause=true --overwrite
+
+                echo "Setting CCX_SERVER on insights-client..."
+                oc set env deployment/insights-client -n open-cluster-management \
+                  CCX_SERVER=http://insights-on-prem.insights-on-prem-poc.svc.cluster.local:8000/api/v2 \
+                  POLL_INTERVAL=1
+
+                echo "Configuring console for URP..."
+                oc get secret ccxdev-insights-on-prem-poc-pull-secret -n insights-on-prem-poc -o json | \
+                  python3 -c "import sys,json; d=json.load(sys.stdin); d['metadata']={'name':'ccxdev-insights-on-prem-poc-pull-secret','namespace':'open-cluster-management'}; print(json.dumps(d))" | \
+                  oc apply -f -
+                oc set image deployment/console-chart-console-v2 -n open-cluster-management \
+                  console=quay.io/ccxdev/insights-on-prem-lsolarov-console:latest
+                oc patch deployment console-chart-console-v2 -n open-cluster-management --type=strategic \
+                  -p='{"spec":{"template":{"spec":{"imagePullSecrets":[{"name":"ccxdev-insights-on-prem-poc-pull-secret"}],"containers":[{"name":"console","imagePullPolicy":"Always"}]}}}}'
+                oc set env deployment/console-chart-console-v2 -n open-cluster-management \
+                  UPGRADE_RISKS_PREDICTION_URL=https://${ROUTE_HOST}/api/insights-results-aggregator/v2/upgrade-risks-prediction
+
+                echo "Restarting insights-operator..."
+                oc rollout restart deployment/insights-operator -n openshift-insights
+
+                echo "Waiting for on-prem pod to be ready..."
+                oc rollout status deployment/insights-on-prem -n insights-on-prem-poc --timeout=120s || true
+
+                echo "Done. Route: https://${ROUTE_HOST}"
