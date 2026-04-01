@@ -189,7 +189,16 @@ spec:
                           sleep 5
                         done
 
-                        echo "Copying search-postgres secret..."
+                        # Detect the actual klusterlet cluster name.
+                        # On clusters that are both a hub AND a spoke of another hub,
+                        # the klusterlet may be registered with a different name than "local-cluster".
+                        KLUSTERLET_NS=$(oc get klusterlet klusterlet -o jsonpath='{.spec.clusterName}' 2>/dev/null || echo "local-cluster")
+                        echo "Klusterlet cluster namespace: ${KLUSTERLET_NS}"
+                        if [ "${KLUSTERLET_NS}" != "local-cluster" ]; then
+                          echo "WARNING: klusterlet (${KLUSTERLET_NS}) != local-cluster. ManifestWork targets local-cluster but agent watches ${KLUSTERLET_NS}. Job-based config below will still apply correctly."
+                        fi
+
+                                                echo "Copying search-postgres secret..."
                         oc get secret search-postgres -n open-cluster-management -o json | \
                           python3 -c "import sys,json; d=json.load(sys.stdin); d['metadata']={'name':'search-postgres','namespace':'insights-on-prem-poc'}; print(json.dumps(d))" | \
                           oc apply -f -
