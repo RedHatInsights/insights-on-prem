@@ -26,6 +26,14 @@ spec:
             name: insights-on-prem
             namespace: insights-on-prem-poc
 
+        # Dedicated ServiceAccount for the configure Job — keeps broad privileges
+        # separate from the long-lived app ServiceAccount.
+        - apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: insights-on-prem-configurator
+            namespace: insights-on-prem-poc
+
         - apiVersion: rbac.authorization.k8s.io/v1
           kind: ClusterRole
           metadata:
@@ -82,7 +90,7 @@ spec:
             name: insights-on-prem-configurator
           subjects:
             - kind: ServiceAccount
-              name: insights-on-prem
+              name: insights-on-prem-configurator
               namespace: insights-on-prem-poc
 
         - apiVersion: apps/v1

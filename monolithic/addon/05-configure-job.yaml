@@ -3,15 +3,23 @@
 # it runs immediately when oc apply -f addon/ is executed.
 #
 # TODO: most steps here are temporary — see 04-addon-template.yaml for details.
+#
+# NOTE: This Job does not have a symmetric teardown. On addon uninstall, the
+# following must be reverted manually:
+#   oc annotate multiclusterhub multiclusterhub -n open-cluster-management mch-pause-
+#   oc set env deployment/insights-client -n open-cluster-management CCX_SERVER- POLL_INTERVAL-
+#   oc set image deployment/console-chart-console-v2 -n open-cluster-management console=<original-image>
+#   oc set env deployment/console-chart-console-v2 -n open-cluster-management UPGRADE_RISKS_PREDICTION_URL-
+#   oc delete secret ccxdev-insights-on-prem-poc-pull-secret -n open-cluster-management
 apiVersion: batch/v1
-  kind: Job
-  metadata:
+kind: Job
+metadata:
     name: insights-on-prem-configure
     namespace: insights-on-prem-poc
-  spec:
+spec:
     template:
       spec:
-        serviceAccountName: insights-on-prem
+        serviceAccountName: insights-on-prem-configurator
         restartPolicy: OnFailure
         containers:
           - name: configure
@@ -74,6 +82,6 @@ apiVersion: batch/v1
                 oc rollout restart deployment/insights-operator -n openshift-insights
 
                 echo "Waiting for on-prem pod to be ready..."
-                oc rollout status deployment/insights-on-prem -n insights-on-prem-poc --timeout=120s || true
+                oc rollout status deployment/insights-on-prem -n insights-on-prem-poc --timeout=120s
 
                 echo "Done. Route: https://${ROUTE_HOST}"
