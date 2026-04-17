@@ -30,9 +30,9 @@ spec:
   - name: image-expires-after
     value: 5d
   - name: dockerfile
-    value: monolithic/Dockerfile
+    value: Dockerfile
   - name: path-context
-    value: .
+    value: monolithic
   pipelineRef:
     name: docker-build
   taskRunTemplate:
