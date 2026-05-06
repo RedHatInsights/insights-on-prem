@@ -88,9 +88,15 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: open-cluster-management
+          podSelector:
+            matchLabels:
+              name: insights-client
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: openshift-insights
+          podSelector:
+            matchLabels:
+              app: insights-operator
       ports:
         - protocol: TCP
           port: 8000
