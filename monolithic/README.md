@@ -242,7 +242,7 @@ oc get policyreport --all-namespaces
 
 ## How to mock Insights Operator archive upload
 
-You can use [molodec](https://gitlab.cee.redhat.com/ccx/molodec) to generate a 
+You can use [molodec](https://gitlab.cee.redhat.com/ccx/molodec) to generate a
 fake archive for testing purposes:
 
 ```
