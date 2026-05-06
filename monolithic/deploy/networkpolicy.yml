@@ -1,5 +1,37 @@
-# Restrict who can reach PostgreSQL on 5432.
 # Requires a CNI that enforces NetworkPolicy (e.g. OVN-Kubernetes on OpenShift).
+---
+# Default deny all ingress and egress for every pod in the namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# Allow all pods to reach cluster DNS.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-dns
+spec:
+  podSelector: {}
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-dns
+      ports:
+        - protocol: TCP
+          port: 5353
+        - protocol: UDP
+          port: 5353
+  policyTypes:
+    - Egress
+---
+# Allow only insights-on-prem pods to reach PostgreSQL on 5432.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -18,3 +50,69 @@ spec:
       ports:
         - protocol: TCP
           port: 5432
+---
+# Allow insights-on-prem pods to reach PostgreSQL on 5432 (egress side).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: insights-app-egress-to-postgres
+spec:
+  podSelector:
+    matchLabels:
+      app: insights-on-prem
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: insights-postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+  policyTypes:
+    - Egress
+---
+# Allow ingress to the app from the OpenShift router, insights-client, and insights-operator.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: insights-app-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app: insights-on-prem
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              policy-group.network.openshift.io/ingress: ""
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: open-cluster-management
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-insights
+      ports:
+        - protocol: TCP
+          port: 8000
+  policyTypes:
+    - Ingress
+---
+# Allow insights-on-prem to reach Thanos in open-cluster-management-observability.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: insights-app-egress-to-thanos
+spec:
+  podSelector:
+    matchLabels:
+      app: insights-on-prem
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: open-cluster-management-observability
+      ports:
+        - protocol: TCP
+          port: 8443
+  policyTypes:
+    - Egress

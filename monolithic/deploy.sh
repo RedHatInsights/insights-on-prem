@@ -20,8 +20,9 @@ oc apply -f deploy/serviceaccount.yml
 echo "5. Deploying application..."
 oc apply -f deploy/insights.yml --namespace insights-on-prem-poc
 
-echo "6. Creating service..."
+echo "6. Creating service and route..."
 oc apply -f deploy/service.yml --namespace insights-on-prem-poc
+oc apply -f deploy/route.yml --namespace insights-on-prem-poc
 
 echo "7. Configuring OpenShift insights-operator..."
 # Apply insights-operator ConfigMap to redirect uploads to on-premise service

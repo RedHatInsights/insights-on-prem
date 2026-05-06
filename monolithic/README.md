@@ -240,6 +240,25 @@ The command should trigger [webhook_timeout_is_larger_than_default](https://gitl
 oc get policyreport --all-namespaces
 ```
 
+## How to mock Insights Operator archive upload
+
+You can use [molodec](https://gitlab.cee.redhat.com/ccx/molodec) to generate a 
+fake archive for testing purposes:
+
+```
+source /path/to/molodec/venv/bin/activate
+molodec archive generate archive.tar
+```
+
+Upload the archive to the on-prem service:
+```bash
+ROUTE=$(oc get route insights-on-prem -n insights-on-prem-poc -o jsonpath='{.spec.host}')
+curl -k -X POST "https://${ROUTE}/api/ingress/v1/upload" -F "file=@archive.tar"
+```
+
+Note that these archives don't produce any recommendations for the UI,
+as the clusters are fake and not managed by ACM.
+
 ## Viewing Results in the ACM Fleet Overview UI
 
 The results of the on-premise pipeline are visible in the ACM fleet overview at:
