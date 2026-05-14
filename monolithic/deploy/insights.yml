@@ -14,10 +14,16 @@ spec:
       containers:
       - name: insights-on-prem
         image: quay.io/ccxdev/insights-on-premise-poc:latest
+        command: ["sh", "-c",
+          "uvicorn app.main:app --host 0.0.0.0 --port 8443 --ssl-keyfile /tls/tls.key --ssl-certfile /tls/tls.crt"]
         ports:
-        - containerPort: 8000
-          name: http
+        - containerPort: 8443
+          name: https
           protocol: TCP
+        volumeMounts:
+        - name: tls
+          mountPath: /tls
+          readOnly: true
         env:
         - name: POSTGRES_HOST
           value: "insights-postgres"
@@ -38,6 +44,10 @@ spec:
             secretKeyRef:
               name: insights-postgres
               key: database-name
+      volumes:
+      - name: tls
+        secret:
+          secretName: insights-on-prem-tls
       imagePullSecrets:
       - name: ccxdev-insights-on-prem-poc-pull-secret
   selector:

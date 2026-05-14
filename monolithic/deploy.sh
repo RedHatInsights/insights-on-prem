@@ -16,15 +16,43 @@ oc apply -f deploy/ccxdev-insights-on-prem-poc-secret.yml --namespace insights-o
 echo "4. Setting up ServiceAccount for Thanos access..."
 oc apply -f deploy/serviceaccount.yml
 
-echo "5. Deploying application..."
-oc apply -f deploy/insights.yml --namespace insights-on-prem-poc
-
-echo "6. Creating service..."
+echo "5. Creating service (generates TLS serving cert)..."
 oc apply -f deploy/service.yml --namespace insights-on-prem-poc
+
+echo "   Waiting for serving cert secret..."
+oc wait --for=create secret/insights-on-prem-tls -n insights-on-prem-poc --timeout=30s 2>/dev/null || \
+  until oc get secret insights-on-prem-tls -n insights-on-prem-poc &>/dev/null; do sleep 1; done
+
+echo "6. Deploying application..."
+oc apply -f deploy/insights.yml --namespace insights-on-prem-poc
 
 echo "7. Configuring OpenShift insights-operator..."
 # Apply insights-operator ConfigMap to redirect uploads to on-premise service
 oc apply -f deploy/insights-config.yml
+
+# Add the service CA to the cluster's proxy trust bundle so the
+# insights-operator (and any other component using inject-trusted-cabundle
+# ConfigMaps) trusts the TLS cert served by the insights-on-prem service.
+# The CNO reconciles this into every trusted-ca-bundle ConfigMap automatically.
+echo "   Adding service CA to cluster proxy trust bundle..."
+oc get configmap signing-cabundle -n openshift-service-ca \
+  -o jsonpath='{.data.ca-bundle\.crt}' > /tmp/service-ca.crt
+SERVICE_CA_LINE=$(grep -v '^-' /tmp/service-ca.crt | head -1)
+oc create configmap insights-on-prem-trusted-ca -n openshift-config \
+  --from-file=ca-bundle.crt=/tmp/service-ca.crt --dry-run=client -o yaml | \
+  oc apply -f -
+rm -f /tmp/service-ca.crt
+oc patch proxy cluster --type=merge \
+  -p '{"spec":{"trustedCA":{"name":"insights-on-prem-trusted-ca"}}}'
+
+# Wait for CNO to reconcile the trusted-ca-bundle with the service CA
+echo "   Waiting for trusted-ca-bundle reconciliation..."
+until oc get configmap trusted-ca-bundle -n openshift-insights \
+  -o jsonpath='{.data.ca-bundle\.crt}' 2>/dev/null | \
+  grep -q "$SERVICE_CA_LINE"; do
+  sleep 2
+done
+
 oc rollout restart -n openshift-insights deployment insights-operator
 
 echo "8. Pausing MultiClusterHub operator..."
@@ -35,7 +63,7 @@ echo "9. Configuring ACM insights-client..."
 # Update the CCX_SERVER environment variable to point to on-premise service
 # Also, set insights-client poll interval to 1 minute for demo purposes
 oc set env deployment/insights-client -n open-cluster-management \
-  CCX_SERVER=http://insights-on-prem.insights-on-prem-poc.svc.cluster.local:8000/api/v2 \
+  CCX_SERVER=https://insights-on-prem.insights-on-prem-poc.svc.cluster.local:8443/api/v2 \
   POLL_INTERVAL=1
 
 echo "10. Waiting for insights-client to roll out..."
