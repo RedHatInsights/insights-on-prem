@@ -13,9 +13,9 @@ spec:
       serviceAccountName: insights-on-prem
       containers:
       - name: insights-on-prem
-        image: quay.io/ccxdev/insights-on-premise-poc:latest
+        image: quay.io/jipapous/insights-on-prem-poc:latest
         command: ["sh", "-c",
-          "uvicorn app.main:app --host 0.0.0.0 --port 8443 --ssl-keyfile /tls/tls.key --ssl-certfile /tls/tls.crt"]
+          "python -m app.services.server_cert && uvicorn app.main:app --host 0.0.0.0 --port 8443 --ssl-keyfile /tls/tls.key --ssl-certfile /tls/tls.crt $([ \"$MTLS_ENABLED\" = 'true' ] && [ -f /mtls-ca/tls.crt ] && echo '--ssl-ca-certs /mtls-ca/tls.crt --ssl-cert-reqs 2')"]
         ports:
         - containerPort: 8443
           name: https
@@ -23,8 +23,12 @@ spec:
         volumeMounts:
         - name: tls
           mountPath: /tls
+        - name: client-ca
+          mountPath: /mtls-ca
           readOnly: true
         env:
+        - name: MTLS_ENABLED
+          value: "true"
         - name: POSTGRES_HOST
           value: "insights-postgres"
         - name: POSTGRES_PORT
@@ -46,10 +50,13 @@ spec:
               key: database-name
       volumes:
       - name: tls
+        emptyDir: {}
+      - name: client-ca
         secret:
-          secretName: insights-on-prem-tls
+          secretName: insights-operator-proxy-ca
+          optional: true
       imagePullSecrets:
-      - name: ccxdev-insights-on-prem-poc-pull-secret
+      - name: jipapous-insights-on-prem-pull-secret
   selector:
     matchLabels:
       app: insights-on-prem

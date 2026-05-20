@@ -1,0 +1,161 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: insights-operator-proxy
+  namespace: insights-on-prem-poc
+  annotations:
+    policy.open-cluster-management.io/categories: CM Configuration Management
+    policy.open-cluster-management.io/standards: NIST SP 800-53
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    # --- HAProxy ConfigMap ---
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: insights-operator-proxy-config
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: ConfigMap
+                metadata:
+                  name: insights-operator-proxy-config
+                  namespace: openshift-insights
+                data:
+                  haproxy.cfg: |
+                    global
+                        log stdout format raw local0
+
+                    defaults
+                        mode http
+                        log global
+                        option httplog
+                        timeout connect 5s
+                        timeout client 30s
+                        timeout server 30s
+
+                    frontend proxy
+                        bind *:8443 ssl crt /tmp/server.pem
+                        default_backend hub
+
+                    backend hub
+                        server hub {{hub (lookup "route.openshift.io/v1" "Route" "insights-on-prem-poc" "insights-on-prem").spec.host hub}}:443 ssl crt /tmp/client.pem ca-file /certs/hub-ca/ca-bundle.crt verify required sni str({{hub (lookup "route.openshift.io/v1" "Route" "insights-on-prem-poc" "insights-on-prem").spec.host hub}})
+
+    # --- proxy Service ---
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: insights-operator-proxy-service
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Service
+                metadata:
+                  name: insights-operator-proxy
+                  namespace: openshift-insights
+                  annotations:
+                    service.beta.openshift.io/serving-cert-secret-name: insights-operator-proxy-tls
+                spec:
+                  selector:
+                    app: insights-operator-proxy
+                  ports:
+                    - port: 8443
+                      targetPort: 8443
+                      protocol: TCP
+                      name: https
+
+    # --- Hub service CA (for verifying the hub's server cert) ---
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: insights-operator-proxy-hub-ca
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: ConfigMap
+                metadata:
+                  name: insights-operator-proxy-hub-ca
+                  namespace: openshift-insights
+                data:
+                  ca-bundle.crt: |
+                    {{hub fromConfigMap "insights-on-prem-poc" "insights-on-prem-service-ca" "ca-bundle.crt" | autoindent hub}}
+
+    # --- Insights Operator configuration ---
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: insights-operator-proxy-operator-config
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: ConfigMap
+                metadata:
+                  name: insights-config
+                  namespace: openshift-insights
+                data:
+                  config.yaml: |
+                    dataReporting:
+                      uploadEndpoint: https://insights-operator-proxy.openshift-insights.svc:8443/api/ingress/v1/upload
+                      downloadEndpoint: https://insights-operator-proxy.openshift-insights.svc:8443/api/v2/cluster/%s/reports
+                      downloadEndpointTechPreview: https://insights-operator-proxy.openshift-insights.svc:8443/api/v2/cluster/%s/request/%s/report
+                      processingStatusEndpoint: https://insights-operator-proxy.openshift-insights.svc:8443/api/v2/cluster/%s/request/%s/status
+                      interval: 0h1m0s
+---
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: default
+  namespace: insights-on-prem-poc
+spec:
+  clusterSet: default
+---
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: insights-operator-proxy-spokes
+  namespace: insights-on-prem-poc
+spec:
+  tolerations:
+    - key: cluster.open-cluster-management.io/unreachable
+      operator: Exists
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchExpressions:
+            - key: vendor
+              operator: Exists
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: insights-operator-proxy
+  namespace: insights-on-prem-poc
+placementRef:
+  name: insights-operator-proxy-spokes
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+subjects:
+  - name: insights-operator-proxy
+    apiGroup: policy.open-cluster-management.io
+    kind: Policy

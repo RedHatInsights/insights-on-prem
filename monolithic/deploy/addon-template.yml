@@ -1,0 +1,67 @@
+apiVersion: addon.open-cluster-management.io/v1alpha1
+kind: AddOnTemplate
+metadata:
+  name: insights-operator-proxy
+spec:
+  addonName: insights-operator-proxy
+  registration:
+    - type: CustomSigner
+      customSigner:
+        signerName: open-cluster-management.io/insights-on-prem-signer
+        subject:
+          user: managed-cluster-observability
+          groups:
+            - system:open-cluster-management:insights-operator-proxy
+        signingCA:
+          namespace: insights-on-prem-poc
+          name: insights-operator-proxy-ca
+  agentSpec:
+    workload:
+      manifests:
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: insights-operator-proxy
+            namespace: openshift-insights
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: insights-operator-proxy
+            template:
+              metadata:
+                labels:
+                  app: insights-operator-proxy
+              spec:
+                containers:
+                  - name: haproxy
+                    image: docker.io/haproxy:lts-alpine
+                    command: ["sh", "-c"]
+                    args:
+                      - |
+                        cat /certs/server/tls.crt /certs/server/tls.key > /tmp/server.pem &&
+                        cat /managed/open-cluster-management.io-insights-on-prem-signer/tls.crt /managed/open-cluster-management.io-insights-on-prem-signer/tls.key > /tmp/client.pem &&
+                        haproxy -f /usr/local/etc/haproxy/haproxy.cfg
+                    ports:
+                      - containerPort: 8443
+                        protocol: TCP
+                    volumeMounts:
+                      - name: server-cert
+                        mountPath: /certs/server
+                        readOnly: true
+                      - name: hub-ca
+                        mountPath: /certs/hub-ca
+                        readOnly: true
+                      - name: haproxy-config
+                        mountPath: /usr/local/etc/haproxy
+                        readOnly: true
+                volumes:
+                  - name: server-cert
+                    secret:
+                      secretName: insights-operator-proxy-tls
+                  - name: hub-ca
+                    configMap:
+                      name: insights-operator-proxy-hub-ca
+                  - name: haproxy-config
+                    configMap:
+                      name: insights-operator-proxy-config
