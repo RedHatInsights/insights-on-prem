@@ -47,9 +47,11 @@ def _load_kube_config():
 
 def _generate_ca():
     key = rsa.generate_private_key(public_exponent=65537, key_size=4096)
-    subject = issuer = x509.Name([
-        x509.NameAttribute(NameOID.COMMON_NAME, "insights-on-prem-server-ca"),
-    ])
+    subject = issuer = x509.Name(
+        [
+            x509.NameAttribute(NameOID.COMMON_NAME, "insights-on-prem-server-ca"),
+        ]
+    )
     cert = (
         x509.CertificateBuilder()
         .subject_name(subject)
@@ -99,7 +101,9 @@ def _ensure_ca_secret(core_v1: client.CoreV1Api, namespace: str):
         ca_cert = x509.load_pem_x509_certificate(
             base64.b64decode(secret.data["tls.crt"])
         )
-        logger.info("Loaded existing server CA from Secret %s/%s", namespace, CA_SECRET_NAME)
+        logger.info(
+            "Loaded existing server CA from Secret %s/%s", namespace, CA_SECRET_NAME
+        )
         return ca_key, ca_cert
     except client.ApiException as e:
         if e.status != 404:
@@ -151,9 +155,11 @@ def _get_route_hostname(namespace: str) -> str:
 
 def _generate_server_cert(ca_key, ca_cert, sans: list[str]):
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    subject = x509.Name([
-        x509.NameAttribute(NameOID.COMMON_NAME, sans[0]),
-    ])
+    subject = x509.Name(
+        [
+            x509.NameAttribute(NameOID.COMMON_NAME, sans[0]),
+        ]
+    )
 
     san_entries = [x509.DNSName(name) for name in sans]
 

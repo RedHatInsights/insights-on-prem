@@ -44,9 +44,11 @@ def _load_kube_clients():
 def _generate_ca():
     """Generate a self-signed CA keypair."""
     key = rsa.generate_private_key(public_exponent=65537, key_size=4096)
-    subject = issuer = x509.Name([
-        x509.NameAttribute(NameOID.COMMON_NAME, "insights-on-prem-ca"),
-    ])
+    subject = issuer = x509.Name(
+        [
+            x509.NameAttribute(NameOID.COMMON_NAME, "insights-on-prem-ca"),
+        ]
+    )
     cert = (
         x509.CertificateBuilder()
         .subject_name(subject)
