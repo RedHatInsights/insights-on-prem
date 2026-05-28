@@ -1,10 +1,10 @@
-# Insights on Prem PoC
+# Insights on Prem — Microservices (archived)
 
-This repository contains all files necessary for running Insights on Prem. In the PoC phase, we are considering two different variants:
+Deployment of the full console.redhat.com pipeline components individually on-premise. This approach was explored early on but we decided to pursue the monolithic architecture instead.
 
-1. Deployment of all required components of the original pipeline 
-   as it is currently runnning on console.redhat.com. Deployment files
-   and guide to run the pipeline is located under `microservices` directory.
-2. Development of separate new application that would provide 
-   minimal features of the original pipeline and deployment
-   of this app instead. This approach can be found under `monolithic` directory.
+- **Deploy manifests** (`microservices/deploy/`) — Kubernetes YAMLs for namespace, secrets, Kafka (Strimzi), ingestion, writers, API services, upgrades, identity injector, and Thanos integration
+- **Scripts** — `edp.sh` for setup, `verify-pipeline.sh` for validation, `test_upload.py` for testing uploads
+
+---
+
+The active monolithic approach lives on [`master`](https://github.com/RedHatInsights/insights-on-prem/tree/master).
