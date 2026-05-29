@@ -6,167 +6,42 @@ keypairs and submits CSRs; this service approves and signs them so the
 agent can deliver the signed cert to the spoke.
 """
 
+import asyncio
 import base64
 import datetime
 import logging
+import time
 
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.x509.oid import NameOID
-from kubernetes import client, config, watch
+from cryptography.hazmat.primitives import serialization
+from kubernetes import client, watch
+
+from app.utils.kube_tls import (
+    build_leaf_cert,
+    ensure_ca_secret,
+    get_pod_namespace,
+    load_kube_config,
+)
 
 logger = logging.getLogger(__name__)
 
 SIGNER_NAME = "open-cluster-management.io/insights-on-prem-signer"
 CA_SECRET_NAME = "insights-operator-proxy-ca"
-CA_CERT_VALIDITY_DAYS = 3650
+CA_COMMON_NAME = "insights-on-prem-ca"
 CLIENT_CERT_VALIDITY_DAYS = 365
 ALLOWED_USERNAME_PREFIX = "system:open-cluster-management:"
-_NAMESPACE_FILE = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
-
-
-def _get_pod_namespace() -> str:
-    """Read the pod's namespace from the service account mount."""
-    with open(_NAMESPACE_FILE) as f:
-        return f.read().strip()
-
-
-def _load_kube_clients():
-    """Load kubernetes clients, preferring in-cluster config."""
-    try:
-        config.load_incluster_config()
-    except config.ConfigException:
-        config.load_kube_config()
-    return client.CoreV1Api(), client.CertificatesV1Api()
-
-
-def _generate_ca():
-    """Generate a self-signed CA keypair."""
-    key = rsa.generate_private_key(public_exponent=65537, key_size=4096)
-    subject = issuer = x509.Name(
-        [
-            x509.NameAttribute(NameOID.COMMON_NAME, "insights-on-prem-ca"),
-        ]
-    )
-    cert = (
-        x509.CertificateBuilder()
-        .subject_name(subject)
-        .issuer_name(issuer)
-        .public_key(key.public_key())
-        .serial_number(x509.random_serial_number())
-        .not_valid_before(datetime.datetime.now(datetime.timezone.utc))
-        .not_valid_after(
-            datetime.datetime.now(datetime.timezone.utc)
-            + datetime.timedelta(days=CA_CERT_VALIDITY_DAYS)
-        )
-        .add_extension(
-            x509.BasicConstraints(ca=True, path_length=0),
-            critical=True,
-        )
-        .add_extension(
-            x509.KeyUsage(
-                digital_signature=False,
-                key_cert_sign=True,
-                crl_sign=True,
-                content_commitment=False,
-                key_encipherment=False,
-                data_encipherment=False,
-                key_agreement=False,
-                encipher_only=False,
-                decipher_only=False,
-            ),
-            critical=True,
-        )
-        .sign(key, hashes.SHA256())
-    )
-    return key, cert
-
-
-def ensure_ca_secret(namespace: str):
-    """Create CA Secret if it doesn't exist, return (ca_key, ca_cert)."""
-    core_v1, _ = _load_kube_clients()
-
-    try:
-        secret = core_v1.read_namespaced_secret(CA_SECRET_NAME, namespace)
-        ca_key = serialization.load_pem_private_key(
-            base64.b64decode(secret.data["tls.key"]),
-            password=None,
-        )
-        ca_cert = x509.load_pem_x509_certificate(
-            base64.b64decode(secret.data["tls.crt"])
-        )
-        logger.info("Loaded existing CA from Secret %s/%s", namespace, CA_SECRET_NAME)
-        return ca_key, ca_cert
-    except client.ApiException as e:
-        if e.status != 404:
-            raise
-
-    logger.info("CA Secret not found, generating new CA")
-    ca_key, ca_cert = _generate_ca()
-
-    key_pem = ca_key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption(),
-    )
-    cert_pem = ca_cert.public_bytes(serialization.Encoding.PEM)
-
-    secret = client.V1Secret(
-        metadata=client.V1ObjectMeta(name=CA_SECRET_NAME, namespace=namespace),
-        type="kubernetes.io/tls",
-        data={
-            "tls.key": base64.b64encode(key_pem).decode(),
-            "tls.crt": base64.b64encode(cert_pem).decode(),
-        },
-    )
-    core_v1.create_namespaced_secret(namespace, secret)
-    logger.info("Created CA Secret %s/%s", namespace, CA_SECRET_NAME)
-    return ca_key, ca_cert
 
 
 def _sign_csr(csr_pem: bytes, ca_key, ca_cert) -> bytes:
     """Sign a CSR with the CA and return the signed certificate PEM."""
     csr = x509.load_pem_x509_csr(csr_pem)
-
-    now = datetime.datetime.now(datetime.timezone.utc)
-    ca_remaining = ca_cert.not_valid_after_utc - now
-    validity = min(
-        datetime.timedelta(days=CLIENT_CERT_VALIDITY_DAYS),
-        ca_remaining,
-    )
-
-    cert = (
-        x509.CertificateBuilder()
-        .subject_name(csr.subject)
-        .issuer_name(ca_cert.subject)
-        .public_key(csr.public_key())
-        .serial_number(x509.random_serial_number())
-        .not_valid_before(now)
-        .not_valid_after(now + validity)
-        .add_extension(
-            x509.BasicConstraints(ca=False, path_length=None),
-            critical=True,
-        )
-        .add_extension(
-            x509.KeyUsage(
-                digital_signature=True,
-                key_encipherment=True,
-                content_commitment=False,
-                key_cert_sign=False,
-                crl_sign=False,
-                data_encipherment=False,
-                key_agreement=False,
-                encipher_only=False,
-                decipher_only=False,
-            ),
-            critical=True,
-        )
-        .add_extension(
-            x509.ExtendedKeyUsage([x509.oid.ExtendedKeyUsageOID.CLIENT_AUTH]),
-            critical=False,
-        )
-        .sign(ca_key, hashes.SHA256())
+    cert = build_leaf_cert(
+        subject=csr.subject,
+        public_key=csr.public_key(),
+        ca_key=ca_key,
+        ca_cert=ca_cert,
+        validity_days=CLIENT_CERT_VALIDITY_DAYS,
+        extended_key_usage=x509.oid.ExtendedKeyUsageOID.CLIENT_AUTH,
     )
     return cert.public_bytes(serialization.Encoding.PEM)
 
@@ -198,18 +73,68 @@ async def run_csr_watcher():
     The kubernetes watch API is synchronous and blocks on HTTP long-poll,
     so it must run in a thread to avoid freezing the asyncio event loop.
     """
-    import asyncio
-
     await asyncio.to_thread(_csr_watch_loop)
+
+
+def _should_process(event) -> str | None:
+    """Return the requester's username if this CSR needs signing, None to skip."""
+    if event["type"] not in ("ADDED", "MODIFIED"):
+        return None
+
+    csr_obj = event["object"]
+
+    if csr_obj.status and csr_obj.status.certificate:
+        return None
+
+    if csr_obj.status and csr_obj.status.conditions:
+        if "Approved" in {c.type for c in csr_obj.status.conditions}:
+            return None
+
+    username = csr_obj.spec.username or ""
+    if not username.startswith(ALLOWED_USERNAME_PREFIX):
+        logger.warning(
+            "Rejecting CSR %s: username %s does not start with %s",
+            csr_obj.metadata.name,
+            username,
+            ALLOWED_USERNAME_PREFIX,
+        )
+        return None
+
+    return username
+
+
+def _process_csr(certs_v1, csr_obj, ca_key, ca_cert):
+    """Approve a CSR, sign it with the CA, and upload the signed certificate."""
+    csr_name = csr_obj.metadata.name
+
+    _approve_csr(certs_v1, csr_name)
+
+    csr_pem = base64.b64decode(csr_obj.spec.request)
+    signed_cert_pem = _sign_csr(csr_pem, ca_key, ca_cert)
+
+    certs_v1.patch_certificate_signing_request_status(
+        csr_name,
+        body={
+            "status": {
+                "certificate": base64.b64encode(signed_cert_pem).decode()
+            }
+        },
+    )
+
+    logger.info("Signed CSR %s successfully", csr_name)
 
 
 def _csr_watch_loop():
     """Blocking CSR watch loop — runs in a thread via asyncio.to_thread."""
-    import time
+    load_kube_config()
+    namespace = get_pod_namespace()
 
-    namespace = _get_pod_namespace()
-    ca_key, ca_cert = ensure_ca_secret(namespace)
-    _, certs_v1 = _load_kube_clients()
+    core_v1 = client.CoreV1Api()
+    certs_v1 = client.CertificatesV1Api()
+
+    ca_key, ca_cert = ensure_ca_secret(
+        core_v1, namespace, CA_SECRET_NAME, CA_COMMON_NAME
+    )
 
     logger.info("Starting CSR watcher for signer %s", SIGNER_NAME)
 
@@ -221,49 +146,17 @@ def _csr_watch_loop():
                 field_selector=f"spec.signerName={SIGNER_NAME}",
                 timeout_seconds=300,
             ):
+                username = _should_process(event)
+                if not username:
+                    continue
+
                 csr_obj = event["object"]
-                event_type = event["type"]
-
-                if event_type not in ("ADDED", "MODIFIED"):
-                    continue
-
-                csr_name = csr_obj.metadata.name
-
-                if csr_obj.status and csr_obj.status.certificate:
-                    continue
-
-                if csr_obj.status and csr_obj.status.conditions:
-                    conditions = {c.type for c in csr_obj.status.conditions}
-                    if "Approved" in conditions:
-                        continue
-
-                username = csr_obj.spec.username or ""
-                if not username.startswith(ALLOWED_USERNAME_PREFIX):
-                    logger.warning(
-                        "Rejecting CSR %s: username %s does not start with %s",
-                        csr_name,
-                        username,
-                        ALLOWED_USERNAME_PREFIX,
-                    )
-                    continue
-
-                logger.info("Approving and signing CSR %s from %s", csr_name, username)
-
-                _approve_csr(certs_v1, csr_name)
-
-                csr_pem = base64.b64decode(csr_obj.spec.request)
-                signed_cert_pem = _sign_csr(csr_pem, ca_key, ca_cert)
-
-                certs_v1.patch_certificate_signing_request_status(
-                    csr_name,
-                    body={
-                        "status": {
-                            "certificate": base64.b64encode(signed_cert_pem).decode()
-                        }
-                    },
+                logger.info(
+                    "Approving and signing CSR %s from %s",
+                    csr_obj.metadata.name,
+                    username,
                 )
-
-                logger.info("Signed CSR %s successfully", csr_name)
+                _process_csr(certs_v1, csr_obj, ca_key, ca_cert)
 
         except client.ApiException as e:
             logger.error("Kubernetes API error in CSR watcher: %s", e)

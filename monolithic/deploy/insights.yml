@@ -15,7 +15,7 @@ spec:
       - name: insights-on-prem
         image: quay.io/jipapous/insights-on-prem-poc:latest
         command: ["sh", "-c",
-          "python -m app.services.server_cert && uvicorn app.main:app --host 0.0.0.0 --port 8443 --ssl-keyfile /tls/tls.key --ssl-certfile /tls/tls.crt $([ \"$MTLS_ENABLED\" = 'true' ] && [ -f /mtls-ca/tls.crt ] && echo '--ssl-ca-certs /mtls-ca/tls.crt --ssl-cert-reqs 2')"]
+          "python -m app.server_cert && uvicorn app.main:app --host 0.0.0.0 --port 8443 --ssl-keyfile /tls/tls.key --ssl-certfile /tls/tls.crt $([ \"$MTLS_ENABLED\" = 'true' ] && [ -f /mtls-ca/tls.crt ] && echo '--ssl-ca-certs /mtls-ca/tls.crt --ssl-cert-reqs 2')"]
         ports:
         - containerPort: 8443
           name: https
