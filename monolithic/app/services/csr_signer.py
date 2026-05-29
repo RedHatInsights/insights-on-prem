@@ -86,9 +86,12 @@ def _should_process(event) -> str | None:
     if csr_obj.status and csr_obj.status.certificate:
         return None
 
-    if csr_obj.status and csr_obj.status.conditions:
-        if "Approved" in {c.type for c in csr_obj.status.conditions}:
-            return None
+    if (
+        csr_obj.status
+        and csr_obj.status.conditions
+        and "Approved" in {c.type for c in csr_obj.status.conditions}
+    ):
+        return None
 
     username = csr_obj.spec.username or ""
     if not username.startswith(ALLOWED_USERNAME_PREFIX):
@@ -114,11 +117,7 @@ def _process_csr(certs_v1, csr_obj, ca_key, ca_cert):
 
     certs_v1.patch_certificate_signing_request_status(
         csr_name,
-        body={
-            "status": {
-                "certificate": base64.b64encode(signed_cert_pem).decode()
-            }
-        },
+        body={"status": {"certificate": base64.b64encode(signed_cert_pem).decode()}},
     )
 
     logger.info("Signed CSR %s successfully", csr_name)

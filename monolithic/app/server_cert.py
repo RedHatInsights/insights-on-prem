@@ -52,9 +52,7 @@ def _get_route_hostname(namespace: str) -> str:
 
 def _generate_server_cert(ca_key, ca_cert, sans: list[str]):
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    subject = x509.Name(
-        [x509.NameAttribute(NameOID.COMMON_NAME, sans[0])]
-    )
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, sans[0])])
     cert = build_leaf_cert(
         subject=subject,
         public_key=key.public_key(),

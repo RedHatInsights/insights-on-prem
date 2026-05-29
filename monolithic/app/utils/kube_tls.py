@@ -38,9 +38,7 @@ def load_kube_config():
 def generate_ca(common_name: str) -> tuple[rsa.RSAPrivateKey, x509.Certificate]:
     """Generate a self-signed CA keypair with the given CN."""
     key = rsa.generate_private_key(public_exponent=65537, key_size=4096)
-    subject = issuer = x509.Name(
-        [x509.NameAttribute(NameOID.COMMON_NAME, common_name)]
-    )
+    subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
     now = datetime.datetime.now(datetime.timezone.utc)
     cert = (
         x509.CertificateBuilder()
@@ -146,13 +144,13 @@ def ensure_ca_secret(
         ca_cert = x509.load_pem_x509_certificate(
             base64.b64decode(secret.data["tls.crt"])
         )
-        logger.info("Loaded existing CA from Secret %s/%s", namespace, secret_name)
+        logger.info("Loaded existing CA secret")
         return ca_key, ca_cert
     except client.ApiException as e:
         if e.status != 404:
             raise
 
-    logger.info("CA Secret %s not found, generating new CA", secret_name)
+    logger.info("CA secret not found, generating new CA")
     ca_key, ca_cert = generate_ca(common_name)
 
     key_pem = ca_key.private_bytes(
@@ -172,7 +170,7 @@ def ensure_ca_secret(
     )
     try:
         core_v1.create_namespaced_secret(namespace, secret)
-        logger.info("Created CA Secret %s/%s", namespace, secret_name)
+        logger.info("Created CA secret")
     except client.ApiException as e:
         if e.status != 409:
             raise
