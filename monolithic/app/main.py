@@ -39,6 +39,7 @@ from app.schemas import (
 )
 from app.services.content_service import ContentService
 from app.services.csr_signer import run_csr_watcher
+from app.services.server_cert import run_cert_renewal
 from app.services.processor_service import ProcessorService
 from app.services.report_service import ReportService
 from app.services.thanos_service import ThanosService
@@ -80,22 +81,24 @@ async def lifespan(app: FastAPI):
         _cleanup_old_request_reports(session_factory, config)
     )
 
-    # Start CSR watcher for mTLS spoke authentication
+    # Start mTLS background tasks
     csr_task = None
+    cert_renewal_task = None
     if config.mtls_enabled:
         csr_task = asyncio.create_task(run_csr_watcher())
         logger.info("mTLS CSR watcher started")
+        cert_renewal_task = asyncio.create_task(run_cert_renewal())
+        logger.info("Server cert renewal task started")
 
     yield
 
     # Cancel background tasks on shutdown
-    if csr_task:
-        csr_task.cancel()
+    for task in (csr_task, cert_renewal_task, cleanup_task):
+        if task is None:
+            continue
+        task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await csr_task
-    cleanup_task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await cleanup_task
+            await task
 
 
 async def _cleanup_old_request_reports(session_factory, config):

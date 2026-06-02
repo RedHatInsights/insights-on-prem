@@ -39,6 +39,7 @@ class AppConfig:
     plugin_configs: list[dict] = field(default_factory=list)
 
     mtls_enabled: bool = False
+    cert_renewal_check_interval_hours: int = 12
 
     @property
     def database_url(self) -> str:
@@ -69,6 +70,7 @@ _ENV_OVERRIDES = {
         int,
     ),
     "MTLS_ENABLED": ("mtls_enabled", lambda v: v.lower() in ("true", "1", "yes")),
+    "CERT_RENEWAL_CHECK_INTERVAL_HOURS": ("cert_renewal_check_interval_hours", int),
 }
 
 

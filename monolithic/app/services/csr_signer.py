@@ -31,6 +31,16 @@ CA_COMMON_NAME = "insights-on-prem-ca"
 CLIENT_CERT_VALIDITY_DAYS = 365
 ALLOWED_USERNAME_PREFIX = "system:open-cluster-management:"
 
+_client_ca_key = None
+_client_ca_cert = None
+
+
+def update_client_ca(key, cert):
+    """Update the client CA used for signing CSRs (called by cert renewal task)."""
+    global _client_ca_key, _client_ca_cert
+    _client_ca_key = key
+    _client_ca_cert = cert
+
 
 def _sign_csr(csr_pem: bytes, ca_key, ca_cert) -> bytes:
     """Sign a CSR with the CA and return the signed certificate PEM."""
@@ -125,13 +135,15 @@ def _process_csr(certs_v1, csr_obj, ca_key, ca_cert):
 
 def _csr_watch_loop():
     """Blocking CSR watch loop — runs in a thread via asyncio.to_thread."""
+    global _client_ca_key, _client_ca_cert
+
     load_kube_config()
     namespace = get_pod_namespace()
 
     core_v1 = client.CoreV1Api()
     certs_v1 = client.CertificatesV1Api()
 
-    ca_key, ca_cert = ensure_ca_secret(
+    _client_ca_key, _client_ca_cert = ensure_ca_secret(
         core_v1, namespace, CA_SECRET_NAME, CA_COMMON_NAME
     )
 
@@ -155,7 +167,7 @@ def _csr_watch_loop():
                     csr_obj.metadata.name,
                     username,
                 )
-                _process_csr(certs_v1, csr_obj, ca_key, ca_cert)
+                _process_csr(certs_v1, csr_obj, _client_ca_key, _client_ca_cert)
 
         except client.ApiException as e:
             logger.error("Kubernetes API error in CSR watcher: %s", e)

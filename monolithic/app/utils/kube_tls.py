@@ -18,6 +18,7 @@ from kubernetes import client, config
 logger = logging.getLogger(__name__)
 
 CA_CERT_VALIDITY_DAYS = 3650
+CA_RENEWAL_THRESHOLD_DAYS = 365
 _NAMESPACE_FILE = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 
 
@@ -178,3 +179,108 @@ def ensure_ca_secret(
         return ensure_ca_secret(core_v1, namespace, secret_name, common_name)
 
     return ca_key, ca_cert
+
+
+def _parse_pem_chain(pem_data: bytes) -> list[x509.Certificate]:
+    """Parse all PEM certificates from a byte string."""
+    certs = []
+    while pem_data:
+        try:
+            cert = x509.load_pem_x509_certificate(pem_data)
+            certs.append(cert)
+        except ValueError:
+            break
+        cert_pem = cert.public_bytes(serialization.Encoding.PEM)
+        pem_data = pem_data[len(cert_pem) :]
+    return certs
+
+
+def renew_ca_secret(
+    core_v1: client.CoreV1Api,
+    namespace: str,
+    secret_name: str,
+    common_name: str,
+) -> tuple[rsa.RSAPrivateKey, x509.Certificate]:
+    """Renew a CA secret if the active CA is approaching expiry.
+
+    Uses certificate chaining: the new CA cert is prepended to the
+    existing chain so that both old and new CAs are trusted during
+    the transition period.
+
+    Returns the active (newest) CA key and cert.
+    """
+    secret = core_v1.read_namespaced_secret(secret_name, namespace)
+    chain_pem = base64.b64decode(secret.data["tls.crt"])
+    certs = _parse_pem_chain(chain_pem)
+
+    active_cert = certs[0]
+    ca_key = serialization.load_pem_private_key(
+        base64.b64decode(secret.data["tls.key"]),
+        password=None,
+    )
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    remaining = active_cert.not_valid_after_utc - now
+    if remaining > datetime.timedelta(days=CA_RENEWAL_THRESHOLD_DAYS):
+        logger.info(
+            "CA %s valid for %d more days, no renewal needed",
+            secret_name,
+            remaining.days,
+        )
+        return ca_key, active_cert
+
+    logger.info(
+        "CA %s expires in %d days, renewing",
+        secret_name,
+        remaining.days,
+    )
+
+    new_key, new_cert = generate_ca(common_name)
+    new_cert_pem = new_cert.public_bytes(serialization.Encoding.PEM)
+    new_key_pem = new_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+
+    secret.data["tls.key"] = base64.b64encode(new_key_pem).decode()
+    secret.data["tls.crt"] = base64.b64encode(new_cert_pem + chain_pem).decode()
+
+    core_v1.replace_namespaced_secret(secret_name, namespace, secret)
+    logger.info("Renewed CA %s with certificate chaining", secret_name)
+
+    return new_key, new_cert
+
+
+def remove_expired_cas(
+    core_v1: client.CoreV1Api,
+    namespace: str,
+    secret_name: str,
+):
+    """Remove expired CA certificates from the chain in a CA secret."""
+    secret = core_v1.read_namespaced_secret(secret_name, namespace)
+    chain_pem = base64.b64decode(secret.data["tls.crt"])
+    certs = _parse_pem_chain(chain_pem)
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    valid = [c for c in certs if c.not_valid_after_utc > now]
+
+    if len(valid) == len(certs):
+        return
+
+    removed = len(certs) - len(valid)
+    logger.info("Removing %d expired CA cert(s) from %s", removed, secret_name)
+
+    pruned_pem = b"".join(c.public_bytes(serialization.Encoding.PEM) for c in valid)
+    secret.data["tls.crt"] = base64.b64encode(pruned_pem).decode()
+    core_v1.replace_namespaced_secret(secret_name, namespace, secret)
+
+
+def load_ca_bundle_pem(
+    core_v1: client.CoreV1Api,
+    namespace: str,
+    secret_name: str,
+) -> str:
+    """Load the full CA certificate chain from a secret as a PEM string."""
+    secret = core_v1.read_namespaced_secret(secret_name, namespace)
+    return base64.b64decode(secret.data["tls.crt"]).decode()

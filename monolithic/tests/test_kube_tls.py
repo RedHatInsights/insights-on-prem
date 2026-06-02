@@ -11,7 +11,13 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 from kubernetes import client
 
-from app.utils.kube_tls import build_leaf_cert, ensure_ca_secret, generate_ca
+from app.utils.kube_tls import (
+    build_leaf_cert,
+    ensure_ca_secret,
+    generate_ca,
+    remove_expired_cas,
+    renew_ca_secret,
+)
 
 
 @pytest.fixture
@@ -183,3 +189,100 @@ def test_ensure_ca_secret_handles_conflict():
         == "test-ca"
     )
     assert mock_core.read_namespaced_secret.call_count == 2
+
+
+def _make_ca_secret_data_with_validity(common_name, validity_days):
+    """Helper: generate a CA with specific validity and return as secret data."""
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    now = datetime.datetime.now(datetime.timezone.utc)
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now)
+        .not_valid_after(now + datetime.timedelta(days=validity_days))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+        .sign(key, hashes.SHA256())
+    )
+    key_pem = key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    cert_pem = cert.public_bytes(serialization.Encoding.PEM)
+    return {
+        "tls.key": base64.b64encode(key_pem).decode(),
+        "tls.crt": base64.b64encode(cert_pem).decode(),
+    }
+
+
+def test_renew_ca_secret_no_op_when_valid():
+    """Verify renew_ca_secret returns existing CA when plenty of validity remains."""
+    secret_data = _make_ca_secret_data_with_validity("test-ca", validity_days=3650)
+    mock_core = MagicMock(spec=client.CoreV1Api)
+    mock_core.read_namespaced_secret.return_value = MagicMock(data=secret_data)
+
+    ca_key, ca_cert = renew_ca_secret(mock_core, "test-ns", "my-ca", "test-ca")
+
+    assert (
+        ca_cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
+        == "test-ca"
+    )
+    mock_core.replace_namespaced_secret.assert_not_called()
+
+
+def test_renew_ca_secret_renews_when_expiring():
+    """Verify renew_ca_secret generates a new CA and chains it when expiring."""
+    secret_data = _make_ca_secret_data_with_validity("old-ca", validity_days=300)
+    old_cert_pem = base64.b64decode(secret_data["tls.crt"])
+    mock_core = MagicMock(spec=client.CoreV1Api)
+    mock_core.read_namespaced_secret.return_value = MagicMock(data=dict(secret_data))
+
+    ca_key, ca_cert = renew_ca_secret(mock_core, "test-ns", "my-ca", "new-ca")
+
+    assert (
+        ca_cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value == "new-ca"
+    )
+    mock_core.replace_namespaced_secret.assert_called_once()
+
+    updated_secret = mock_core.replace_namespaced_secret.call_args[0][2]
+    chain_pem = base64.b64decode(updated_secret.data["tls.crt"])
+    assert chain_pem.count(b"BEGIN CERTIFICATE") == 2
+    assert old_cert_pem in chain_pem
+
+
+def test_remove_expired_cas():
+    """Verify remove_expired_cas strips expired certs from the chain."""
+    _, valid_cert = generate_ca("valid-ca")
+    valid_pem = valid_cert.public_bytes(serialization.Encoding.PEM)
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    now = datetime.datetime.now(datetime.timezone.utc)
+    expired_cert = (
+        x509.CertificateBuilder()
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "expired")]))
+        .issuer_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "expired")]))
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(days=10))
+        .not_valid_after(now - datetime.timedelta(days=1))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+        .sign(key, hashes.SHA256())
+    )
+    expired_pem = expired_cert.public_bytes(serialization.Encoding.PEM)
+
+    chain = base64.b64encode(valid_pem + expired_pem).decode()
+    secret_data = {"tls.crt": chain, "tls.key": "unused"}
+    mock_core = MagicMock(spec=client.CoreV1Api)
+    mock_core.read_namespaced_secret.return_value = MagicMock(data=secret_data)
+
+    remove_expired_cas(mock_core, "test-ns", "my-ca")
+
+    mock_core.replace_namespaced_secret.assert_called_once()
+    updated = mock_core.replace_namespaced_secret.call_args[0][2]
+    pruned_pem = base64.b64decode(updated.data["tls.crt"])
+    assert pruned_pem.count(b"BEGIN CERTIFICATE") == 1
+    assert b"expired" not in pruned_pem
