@@ -17,6 +17,11 @@ from kubernetes import client, config
 
 logger = logging.getLogger(__name__)
 
+SERVER_CA_SECRET_NAME = "insights-on-prem-server-ca"
+SERVER_CA_COMMON_NAME = "insights-on-prem-server-ca"
+CLIENT_CA_SECRET_NAME = "insights-operator-proxy-ca"
+CLIENT_CA_COMMON_NAME = "insights-on-prem-ca"
+
 CA_CERT_VALIDITY_DAYS = 3650
 CA_RENEWAL_THRESHOLD_DAYS = 365
 _NAMESPACE_FILE = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"

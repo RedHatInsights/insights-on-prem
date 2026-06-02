@@ -16,162 +16,128 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from kubernetes import client, watch
 
-from app.utils.kube_tls import (
-    build_leaf_cert,
-    ensure_ca_secret,
-    get_pod_namespace,
-    load_kube_config,
-)
+from app.utils.kube_tls import build_leaf_cert
 
 logger = logging.getLogger(__name__)
 
 SIGNER_NAME = "open-cluster-management.io/insights-on-prem-signer"
-CA_SECRET_NAME = "insights-operator-proxy-ca"
-CA_COMMON_NAME = "insights-on-prem-ca"
 CLIENT_CERT_VALIDITY_DAYS = 365
 ALLOWED_USERNAME_PREFIX = "system:open-cluster-management:"
 
-_client_ca_key = None
-_client_ca_cert = None
 
+class CSRSigner:
+    """Watches and signs CertificateSigningRequests from spoke clusters.
 
-def update_client_ca(key, cert):
-    """Update the client CA used for signing CSRs (called by cert renewal task)."""
-    global _client_ca_key, _client_ca_cert
-    _client_ca_key = key
-    _client_ca_cert = cert
-
-
-def _sign_csr(csr_pem: bytes, ca_key, ca_cert) -> bytes:
-    """Sign a CSR with the CA and return the signed certificate PEM."""
-    csr = x509.load_pem_x509_csr(csr_pem)
-    cert = build_leaf_cert(
-        subject=csr.subject,
-        public_key=csr.public_key(),
-        ca_key=ca_key,
-        ca_cert=ca_cert,
-        validity_days=CLIENT_CERT_VALIDITY_DAYS,
-        extended_key_usage=x509.oid.ExtendedKeyUsageOID.CLIENT_AUTH,
-    )
-    return cert.public_bytes(serialization.Encoding.PEM)
-
-
-def _approve_csr(certs_v1: client.CertificatesV1Api, csr_name: str):
-    """Approve a CertificateSigningRequest."""
-    now = datetime.datetime.now(datetime.timezone.utc).isoformat() + "Z"
-    certs_v1.patch_certificate_signing_request_approval(
-        csr_name,
-        body={
-            "status": {
-                "conditions": [
-                    {
-                        "type": "Approved",
-                        "status": "True",
-                        "reason": "InsightsOnPremApproved",
-                        "message": "Approved by insights-on-prem CSR signer",
-                        "lastUpdateTime": now,
-                    }
-                ]
-            }
-        },
-    )
-
-
-async def run_csr_watcher():
-    """Start the CSR watcher in a background thread.
-
-    The kubernetes watch API is synchronous and blocks on HTTP long-poll,
-    so it must run in a thread to avoid freezing the asyncio event loop.
+    Reads the client CA key and cert from the TLSManager instance,
+    which keeps them up to date through its renewal loop.
     """
-    await asyncio.to_thread(_csr_watch_loop)
 
+    def __init__(self, tls_manager):
+        self.tls_manager = tls_manager
 
-def _should_process(event) -> str | None:
-    """Return the requester's username if this CSR needs signing, None to skip."""
-    if event["type"] not in ("ADDED", "MODIFIED"):
-        return None
+    @staticmethod
+    def _should_process(event) -> str | None:
+        """Return the requester's username if this CSR needs signing, None to skip."""
+        if event["type"] not in ("ADDED", "MODIFIED"):
+            return None
 
-    csr_obj = event["object"]
+        csr_obj = event["object"]
 
-    if csr_obj.status and csr_obj.status.certificate:
-        return None
+        if csr_obj.status and csr_obj.status.certificate:
+            return None
 
-    if (
-        csr_obj.status
-        and csr_obj.status.conditions
-        and "Approved" in {c.type for c in csr_obj.status.conditions}
-    ):
-        return None
+        if (
+            csr_obj.status
+            and csr_obj.status.conditions
+            and "Approved" in {c.type for c in csr_obj.status.conditions}
+        ):
+            return None
 
-    username = csr_obj.spec.username or ""
-    if not username.startswith(ALLOWED_USERNAME_PREFIX):
-        logger.warning(
-            "Rejecting CSR %s: username %s does not start with %s",
-            csr_obj.metadata.name,
-            username,
-            ALLOWED_USERNAME_PREFIX,
+        username = csr_obj.spec.username or ""
+        if not username.startswith(ALLOWED_USERNAME_PREFIX):
+            logger.warning(
+                "Rejecting CSR %s: username %s does not start with %s",
+                csr_obj.metadata.name,
+                username,
+                ALLOWED_USERNAME_PREFIX,
+            )
+            return None
+
+        return username
+
+    def _sign_csr(self, csr_pem: bytes) -> bytes:
+        csr = x509.load_pem_x509_csr(csr_pem)
+        cert = build_leaf_cert(
+            subject=csr.subject,
+            public_key=csr.public_key(),
+            ca_key=self.tls_manager.client_ca_key,
+            ca_cert=self.tls_manager.client_ca_cert,
+            validity_days=CLIENT_CERT_VALIDITY_DAYS,
+            extended_key_usage=x509.oid.ExtendedKeyUsageOID.CLIENT_AUTH,
         )
-        return None
+        return cert.public_bytes(serialization.Encoding.PEM)
 
-    return username
+    @staticmethod
+    def _approve_csr(certs_v1: client.CertificatesV1Api, csr_name: str):
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat() + "Z"
+        certs_v1.patch_certificate_signing_request_approval(
+            csr_name,
+            body={
+                "status": {
+                    "conditions": [
+                        {
+                            "type": "Approved",
+                            "status": "True",
+                            "reason": "InsightsOnPremApproved",
+                            "message": "Approved by insights-on-prem CSR signer",
+                            "lastUpdateTime": now,
+                        }
+                    ]
+                }
+            },
+        )
 
+    def _process_csr(self, certs_v1, csr_obj):
+        csr_name = csr_obj.metadata.name
+        self._approve_csr(certs_v1, csr_name)
+        csr_pem = base64.b64decode(csr_obj.spec.request)
+        signed_cert_pem = self._sign_csr(csr_pem)
+        certs_v1.patch_certificate_signing_request_status(
+            csr_name,
+            body={
+                "status": {"certificate": base64.b64encode(signed_cert_pem).decode()}
+            },
+        )
+        logger.info("Signed CSR %s successfully", csr_name)
 
-def _process_csr(certs_v1, csr_obj, ca_key, ca_cert):
-    """Approve a CSR, sign it with the CA, and upload the signed certificate."""
-    csr_name = csr_obj.metadata.name
+    def _watch_loop(self):
+        certs_v1 = client.CertificatesV1Api()
+        logger.info("Starting CSR watcher for signer %s", SIGNER_NAME)
+        while True:
+            try:
+                w = watch.Watch()
+                for event in w.stream(
+                    certs_v1.list_certificate_signing_request,
+                    field_selector=f"spec.signerName={SIGNER_NAME}",
+                    timeout_seconds=300,
+                ):
+                    username = self._should_process(event)
+                    if not username:
+                        continue
+                    csr_obj = event["object"]
+                    logger.info(
+                        "Approving and signing CSR %s from %s",
+                        csr_obj.metadata.name,
+                        username,
+                    )
+                    self._process_csr(certs_v1, csr_obj)
+            except client.ApiException as e:
+                logger.error("Kubernetes API error in CSR watcher: %s", e)
+                time.sleep(10)
+            except Exception:
+                logger.exception("Unexpected error in CSR watcher")
+                time.sleep(10)
 
-    _approve_csr(certs_v1, csr_name)
-
-    csr_pem = base64.b64decode(csr_obj.spec.request)
-    signed_cert_pem = _sign_csr(csr_pem, ca_key, ca_cert)
-
-    certs_v1.patch_certificate_signing_request_status(
-        csr_name,
-        body={"status": {"certificate": base64.b64encode(signed_cert_pem).decode()}},
-    )
-
-    logger.info("Signed CSR %s successfully", csr_name)
-
-
-def _csr_watch_loop():
-    """Blocking CSR watch loop — runs in a thread via asyncio.to_thread."""
-    global _client_ca_key, _client_ca_cert
-
-    load_kube_config()
-    namespace = get_pod_namespace()
-
-    core_v1 = client.CoreV1Api()
-    certs_v1 = client.CertificatesV1Api()
-
-    _client_ca_key, _client_ca_cert = ensure_ca_secret(
-        core_v1, namespace, CA_SECRET_NAME, CA_COMMON_NAME
-    )
-
-    logger.info("Starting CSR watcher for signer %s", SIGNER_NAME)
-
-    while True:
-        try:
-            w = watch.Watch()
-            for event in w.stream(
-                certs_v1.list_certificate_signing_request,
-                field_selector=f"spec.signerName={SIGNER_NAME}",
-                timeout_seconds=300,
-            ):
-                username = _should_process(event)
-                if not username:
-                    continue
-
-                csr_obj = event["object"]
-                logger.info(
-                    "Approving and signing CSR %s from %s",
-                    csr_obj.metadata.name,
-                    username,
-                )
-                _process_csr(certs_v1, csr_obj, _client_ca_key, _client_ca_cert)
-
-        except client.ApiException as e:
-            logger.error("Kubernetes API error in CSR watcher: %s", e)
-            time.sleep(10)
-        except Exception:
-            logger.exception("Unexpected error in CSR watcher")
-            time.sleep(10)
+    async def run(self):
+        """Start the CSR watcher in a background thread."""
+        await asyncio.to_thread(self._watch_loop)

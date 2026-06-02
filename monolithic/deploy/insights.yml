@@ -14,7 +14,7 @@ spec:
       containers:
       - name: insights-on-prem
         image: quay.io/jipapous/insights-on-prem-poc:latest
-        command: ["python", "-m", "app"]
+        command: ["python", "-m", "app.main"]
         ports:
         - containerPort: 8443
           name: https
@@ -22,9 +22,6 @@ spec:
         volumeMounts:
         - name: tls
           mountPath: /tls
-        - name: client-ca
-          mountPath: /mtls-ca
-          readOnly: true
         env:
         - name: MTLS_ENABLED
           value: "true"
@@ -50,10 +47,6 @@ spec:
       volumes:
       - name: tls
         emptyDir: {}
-      - name: client-ca
-        secret:
-          secretName: insights-operator-proxy-ca
-          optional: true
       imagePullSecrets:
       - name: jipapous-insights-on-prem-pull-secret
   selector:

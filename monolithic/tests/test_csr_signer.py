@@ -1,15 +1,16 @@
 """Tests for app.services.csr_signer."""
 
 import base64
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
+import pytest
+from app.services.csr_signer import CSRSigner
+from app.utils.kube_tls import generate_ca
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
-
-from app.services.csr_signer import _process_csr, _should_process, _sign_csr
-from app.utils.kube_tls import generate_ca
 
 
 def _make_csr_pem() -> bytes:
@@ -25,87 +26,73 @@ def _make_csr_pem() -> bytes:
     return csr.public_bytes(serialization.Encoding.PEM)
 
 
+def _make_signer():
+    """Create a CSRSigner with a stub TLSManager holding test CA keys."""
+    ca_key, ca_cert = generate_ca("test-ca")
+    tls_manager = SimpleNamespace(client_ca_key=ca_key, client_ca_cert=ca_cert)
+    return CSRSigner(tls_manager), ca_cert
+
+
 def _make_event(
     event_type="ADDED",
     username="system:open-cluster-management:test",
     certificate=None,
     conditions=None,
+    csr_name="test-csr",
+    csr_pem=None,
 ):
-    """Build a minimal watch event dict for _should_process tests."""
+    """Build a minimal watch event dict."""
     status = MagicMock()
     status.certificate = certificate
     status.conditions = conditions
 
     obj = MagicMock()
-    obj.metadata.name = "test-csr"
+    obj.metadata.name = csr_name
     obj.spec.username = username
     obj.status = status
+    if csr_pem is not None:
+        obj.spec.request = base64.b64encode(csr_pem).decode()
 
     return {"type": event_type, "object": obj}
 
 
-def test_sign_csr_returns_valid_cert():
-    """Verify _sign_csr produces a valid client certificate signed by the CA."""
-    ca_key, ca_cert = generate_ca("test-ca")
-    csr_pem = _make_csr_pem()
+async def _run_with_events(signer, events):
+    """Run signer.run() with a mock watch that yields the given events once.
 
-    signed_pem = _sign_csr(csr_pem, ca_key, ca_cert)
-    cert = x509.load_pem_x509_certificate(signed_pem)
-
-    assert (
-        cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
-        == "test-spoke"
-    )
-    assert cert.issuer == ca_cert.subject
-
-    eku = cert.extensions.get_extension_for_class(x509.ExtendedKeyUsage).value
-    assert x509.oid.ExtendedKeyUsageOID.CLIENT_AUTH in eku
-
-
-def test_should_process_added_event():
-    """Verify _should_process returns username for a valid ADDED event."""
-    event = _make_event()
-    assert _should_process(event) == "system:open-cluster-management:test"
-
-
-def test_should_process_skips_non_added():
-    """Verify _should_process skips DELETED events."""
-    event = _make_event(event_type="DELETED")
-    assert _should_process(event) is None
-
-
-def test_should_process_skips_already_signed():
-    """Verify _should_process skips CSRs that already have a certificate."""
-    event = _make_event(certificate=b"some-cert-data")
-    assert _should_process(event) is None
-
-
-def test_should_process_skips_already_approved():
-    """Verify _should_process skips CSRs that are already approved."""
-    condition = MagicMock()
-    condition.type = "Approved"
-    event = _make_event(conditions=[condition])
-    assert _should_process(event) is None
-
-
-def test_should_process_rejects_bad_username():
-    """Verify _should_process rejects CSRs from unauthorized users."""
-    event = _make_event(username="system:serviceaccount:default:hacker")
-    assert _should_process(event) is None
-
-
-def test_process_csr_approves_and_signs():
-    """Verify _process_csr calls approve and uploads the signed certificate."""
-    ca_key, ca_cert = generate_ca("test-ca")
-    csr_pem = _make_csr_pem()
-
-    csr_obj = MagicMock()
-    csr_obj.metadata.name = "test-csr"
-    csr_obj.spec.request = base64.b64encode(csr_pem).decode()
-
+    Uses SystemExit to break the infinite watch loop after the first iteration.
+    """
     mock_certs_v1 = MagicMock()
 
-    _process_csr(mock_certs_v1, csr_obj, ca_key, ca_cert)
+    first_watch = MagicMock()
+    first_watch.stream.return_value = events
+    watches = [first_watch]
+
+    def watch_factory():
+        if watches:
+            return watches.pop(0)
+        raise SystemExit
+
+    with (
+        patch(
+            "app.services.csr_signer.client.CertificatesV1Api",
+            return_value=mock_certs_v1,
+        ),
+        patch("app.services.csr_signer.watch.Watch", side_effect=watch_factory),
+        pytest.raises(SystemExit),
+    ):
+        await signer.run()
+
+    return mock_certs_v1
+
+
+@pytest.mark.asyncio
+async def test_run_approves_and_signs_valid_csr():
+    """Verify run() approves a valid CSR and uploads the signed certificate."""
+    signer, ca_cert = _make_signer()
+    csr_pem = _make_csr_pem()
+
+    event = _make_event(csr_pem=csr_pem)
+    mock_certs_v1 = await _run_with_events(signer, [event])
 
     mock_certs_v1.patch_certificate_signing_request_approval.assert_called_once()
     mock_certs_v1.patch_certificate_signing_request_status.assert_called_once()
@@ -118,3 +105,74 @@ def test_process_csr_approves_and_signs():
         cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
         == "test-spoke"
     )
+    assert cert.issuer == ca_cert.subject
+
+    eku = cert.extensions.get_extension_for_class(x509.ExtendedKeyUsage).value
+    assert x509.oid.ExtendedKeyUsageOID.CLIENT_AUTH in eku
+
+
+@pytest.mark.asyncio
+async def test_run_skips_deleted_event():
+    """Verify run() ignores DELETED events."""
+    signer, _ = _make_signer()
+    event = _make_event(event_type="DELETED")
+    mock_certs_v1 = await _run_with_events(signer, [event])
+
+    mock_certs_v1.patch_certificate_signing_request_approval.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_skips_already_signed_csr():
+    """Verify run() skips CSRs that already have a certificate."""
+    signer, _ = _make_signer()
+    event = _make_event(certificate=b"some-cert-data")
+    mock_certs_v1 = await _run_with_events(signer, [event])
+
+    mock_certs_v1.patch_certificate_signing_request_approval.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_skips_already_approved_csr():
+    """Verify run() skips CSRs that are already approved."""
+    signer, _ = _make_signer()
+    condition = MagicMock()
+    condition.type = "Approved"
+    event = _make_event(conditions=[condition])
+    mock_certs_v1 = await _run_with_events(signer, [event])
+
+    mock_certs_v1.patch_certificate_signing_request_approval.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_rejects_unauthorized_username():
+    """Verify run() rejects CSRs from users without the allowed prefix."""
+    signer, _ = _make_signer()
+    event = _make_event(username="system:serviceaccount:default:hacker")
+    mock_certs_v1 = await _run_with_events(signer, [event])
+
+    mock_certs_v1.patch_certificate_signing_request_approval.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_processes_only_valid_events_in_batch():
+    """Verify run() processes only valid CSRs when given a mix of events."""
+    signer, _ = _make_signer()
+    csr_pem = _make_csr_pem()
+
+    condition = MagicMock()
+    condition.type = "Approved"
+
+    events = [
+        _make_event(event_type="DELETED", csr_name="deleted"),
+        _make_event(
+            username="system:serviceaccount:default:hacker", csr_name="bad-user"
+        ),
+        _make_event(certificate=b"already-signed", csr_name="signed"),
+        _make_event(conditions=[condition], csr_name="approved"),
+        _make_event(csr_pem=csr_pem, csr_name="valid-csr"),
+    ]
+    mock_certs_v1 = await _run_with_events(signer, events)
+
+    mock_certs_v1.patch_certificate_signing_request_approval.assert_called_once()
+    call_args = mock_certs_v1.patch_certificate_signing_request_status.call_args
+    assert call_args[0][0] == "valid-csr"

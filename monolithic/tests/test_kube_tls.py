@@ -5,12 +5,6 @@ import datetime
 from unittest.mock import MagicMock
 
 import pytest
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.x509.oid import NameOID
-from kubernetes import client
-
 from app.utils.kube_tls import (
     build_leaf_cert,
     ensure_ca_secret,
@@ -18,6 +12,11 @@ from app.utils.kube_tls import (
     remove_expired_cas,
     renew_ca_secret,
 )
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
+from kubernetes import client
 
 
 @pytest.fixture
