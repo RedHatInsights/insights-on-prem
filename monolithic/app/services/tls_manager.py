@@ -20,10 +20,8 @@ from kubernetes import client
 
 from app.config_loader import load_config
 from app.utils.kube_tls import (
-    CLIENT_CA_COMMON_NAME,
-    CLIENT_CA_SECRET_NAME,
-    SERVER_CA_COMMON_NAME,
-    SERVER_CA_SECRET_NAME,
+    CLIENT_CA_NAME,
+    SERVER_CA_NAME,
     build_leaf_cert,
     ensure_ca_secret,
     load_ca_bundle_pem,
@@ -60,10 +58,10 @@ class TLSManager:
     def ensure_ca_secrets(self):
         """Create or load both server and client CA secrets."""
         self.server_ca_key, self.server_ca_cert = ensure_ca_secret(
-            self.core_v1, self.namespace, SERVER_CA_SECRET_NAME, SERVER_CA_COMMON_NAME
+            self.core_v1, self.namespace, SERVER_CA_NAME, SERVER_CA_NAME
         )
         self.client_ca_key, self.client_ca_cert = ensure_ca_secret(
-            self.core_v1, self.namespace, CLIENT_CA_SECRET_NAME, CLIENT_CA_COMMON_NAME
+            self.core_v1, self.namespace, CLIENT_CA_NAME, CLIENT_CA_NAME
         )
 
     def _get_route_hostname(self) -> str:
@@ -119,7 +117,7 @@ class TLSManager:
             return x509.load_pem_x509_certificate(f.read())
 
     def _ensure_service_ca_configmap(self):
-        ca_pem = load_ca_bundle_pem(self.core_v1, self.namespace, SERVER_CA_SECRET_NAME)
+        ca_pem = load_ca_bundle_pem(self.core_v1, self.namespace, SERVER_CA_NAME)
         cm = client.V1ConfigMap(
             metadata=client.V1ObjectMeta(
                 name=SERVICE_CA_CONFIGMAP,
@@ -176,7 +174,7 @@ class TLSManager:
 
     def write_client_ca_bundle(self):
         """Write the current client CA bundle to disk and reload on the SSLContext."""
-        ca_pem = load_ca_bundle_pem(self.core_v1, self.namespace, CLIENT_CA_SECRET_NAME)
+        ca_pem = load_ca_bundle_pem(self.core_v1, self.namespace, CLIENT_CA_NAME)
         with open(CLIENT_CA_PATH, "w") as f:
             f.write(ca_pem)
         if self.ssl_context is not None:
@@ -185,13 +183,13 @@ class TLSManager:
 
     def _renew_all_certs(self):
         self.server_ca_key, self.server_ca_cert = renew_ca_secret(
-            self.core_v1, self.namespace, SERVER_CA_SECRET_NAME, SERVER_CA_COMMON_NAME
+            self.core_v1, self.namespace, SERVER_CA_NAME, SERVER_CA_NAME
         )
         self.client_ca_key, self.client_ca_cert = renew_ca_secret(
-            self.core_v1, self.namespace, CLIENT_CA_SECRET_NAME, CLIENT_CA_COMMON_NAME
+            self.core_v1, self.namespace, CLIENT_CA_NAME, CLIENT_CA_NAME
         )
-        remove_expired_cas(self.core_v1, self.namespace, SERVER_CA_SECRET_NAME)
-        remove_expired_cas(self.core_v1, self.namespace, CLIENT_CA_SECRET_NAME)
+        remove_expired_cas(self.core_v1, self.namespace, SERVER_CA_NAME)
+        remove_expired_cas(self.core_v1, self.namespace, CLIENT_CA_NAME)
         self.write_client_ca_bundle()
         self.ensure_server_cert()
 
