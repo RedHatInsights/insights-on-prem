@@ -188,6 +188,7 @@ class TLSManager:
             logger.info("Reloaded SSLContext with updated client CA bundle")
 
     def _renew_all_certs(self):
+        old_server_ca_cert = self.server_ca_cert
         self.server_ca_key, self.server_ca_cert = renew_ca_secret(
             self.core_v1, self.namespace, SERVER_CA_NAME, SERVER_CA_NAME
         )
@@ -197,7 +198,8 @@ class TLSManager:
         remove_expired_cas(self.core_v1, self.namespace, SERVER_CA_NAME)
         remove_expired_cas(self.core_v1, self.namespace, CLIENT_CA_NAME)
         self.write_client_ca_bundle()
-        self.ensure_server_cert(force=True)
+        server_ca_rotated = self.server_ca_cert.serial_number != old_server_ca_cert.serial_number
+        self.ensure_server_cert(force=server_ca_rotated)
 
     async def run_renewal(self):
         """Background task that periodically checks and renews CAs and server cert."""
