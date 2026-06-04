@@ -188,19 +188,6 @@ def ensure_ca_secret(
     return ca_key, ca_cert
 
 
-def _parse_pem_chain(pem_data: bytes) -> list[x509.Certificate]:
-    """Parse all PEM certificates from a byte string."""
-    certs = []
-    while pem_data:
-        try:
-            cert = x509.load_pem_x509_certificate(pem_data)
-            certs.append(cert)
-        except ValueError:
-            break
-        cert_pem = cert.public_bytes(serialization.Encoding.PEM)
-        pem_data = pem_data[len(cert_pem) :]
-    return certs
-
 
 def renew_ca_secret(
     core_v1: client.CoreV1Api,
@@ -218,7 +205,7 @@ def renew_ca_secret(
     """
     secret = core_v1.read_namespaced_secret(secret_name, namespace)
     chain_pem = base64.b64decode(secret.data["tls.crt"])
-    certs = _parse_pem_chain(chain_pem)
+    certs = x509.load_pem_x509_certificates(chain_pem)
 
     active_cert = certs[0]
     ca_key = serialization.load_pem_private_key(
@@ -273,7 +260,7 @@ def remove_expired_cas(
     """Remove expired CA certificates from the chain in a CA secret."""
     secret = core_v1.read_namespaced_secret(secret_name, namespace)
     chain_pem = base64.b64decode(secret.data["tls.crt"])
-    certs = _parse_pem_chain(chain_pem)
+    certs = x509.load_pem_x509_certificates(chain_pem)
 
     now = datetime.datetime.now(datetime.timezone.utc)
     valid = [c for c in certs if c.not_valid_after_utc > now]
