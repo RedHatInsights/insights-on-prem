@@ -136,10 +136,10 @@ class TLSManager:
             )
             logger.info("Updated ConfigMap %s/%s", self.namespace, SERVICE_CA_CONFIGMAP)
 
-    def ensure_server_cert(self):
-        """Generate the server cert if missing or expiring, otherwise no-op."""
+    def ensure_server_cert(self, force=False):
+        """Generate the server cert if missing, expiring, or forced by CA rotation."""
         cert = self._load_cert_from_disk()
-        if cert is not None:
+        if cert is not None and not force:
             now = datetime.datetime.now(datetime.timezone.utc)
             remaining = cert.not_valid_after_utc - now
             if remaining > datetime.timedelta(days=RENEWAL_THRESHOLD_DAYS):
@@ -149,8 +149,10 @@ class TLSManager:
                 )
                 return
             logger.info("Server cert expires in %d days, renewing", remaining.days)
-        else:
+        elif cert is None:
             logger.info("No server cert found, generating")
+        else:
+            logger.info("Forced server cert renewal (CA rotated)")
 
         route_hostname = self._get_route_hostname()
         sans = [
@@ -191,7 +193,7 @@ class TLSManager:
         remove_expired_cas(self.core_v1, self.namespace, SERVER_CA_NAME)
         remove_expired_cas(self.core_v1, self.namespace, CLIENT_CA_NAME)
         self.write_client_ca_bundle()
-        self.ensure_server_cert()
+        self.ensure_server_cert(force=True)
 
     async def run_renewal(self):
         """Background task that periodically checks and renews CAs and server cert."""
