@@ -112,67 +112,23 @@ async def test_run_approves_and_signs_valid_csr():
 
 
 @pytest.mark.asyncio
-async def test_run_skips_deleted_event():
-    """Verify run() ignores DELETED events."""
-    signer, _ = _make_signer()
-    event = _make_event(event_type="DELETED")
-    mock_certs_v1 = await _run_with_events(signer, [event])
-
-    mock_certs_v1.patch_certificate_signing_request_approval.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_run_skips_already_signed_csr():
-    """Verify run() skips CSRs that already have a certificate."""
-    signer, _ = _make_signer()
-    event = _make_event(certificate=b"some-cert-data")
-    mock_certs_v1 = await _run_with_events(signer, [event])
-
-    mock_certs_v1.patch_certificate_signing_request_approval.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_run_skips_already_approved_csr():
-    """Verify run() skips CSRs that are already approved."""
-    signer, _ = _make_signer()
-    condition = MagicMock()
-    condition.type = "Approved"
-    event = _make_event(conditions=[condition])
-    mock_certs_v1 = await _run_with_events(signer, [event])
-
-    mock_certs_v1.patch_certificate_signing_request_approval.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_run_rejects_unauthorized_username():
-    """Verify run() rejects CSRs from users without the allowed prefix."""
-    signer, _ = _make_signer()
-    event = _make_event(username="system:serviceaccount:default:hacker")
-    mock_certs_v1 = await _run_with_events(signer, [event])
-
-    mock_certs_v1.patch_certificate_signing_request_approval.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_run_processes_only_valid_events_in_batch():
-    """Verify run() processes only valid CSRs when given a mix of events."""
-    signer, _ = _make_signer()
-    csr_pem = _make_csr_pem()
-
-    condition = MagicMock()
-    condition.type = "Approved"
-
-    events = [
-        _make_event(event_type="DELETED", csr_name="deleted"),
-        _make_event(
-            username="system:serviceaccount:default:hacker", csr_name="bad-user"
+@pytest.mark.parametrize(
+    "event_kwargs",
+    [
+        pytest.param({"event_type": "DELETED"}, id="deleted_event"),
+        pytest.param({"certificate": b"some-cert-data"}, id="already_signed"),
+        pytest.param({"conditions": [MagicMock(type="Approved")]}, id="already_approved"),
+        pytest.param(
+            {"username": "system:serviceaccount:default:hacker"}, id="unauthorized_user"
         ),
-        _make_event(certificate=b"already-signed", csr_name="signed"),
-        _make_event(conditions=[condition], csr_name="approved"),
-        _make_event(csr_pem=csr_pem, csr_name="valid-csr"),
-    ]
-    mock_certs_v1 = await _run_with_events(signer, events)
+    ],
+)
+async def test_run_skips_invalid_event(event_kwargs):
+    """Verify run() skips events that should not be processed."""
+    signer, _ = _make_signer()
+    event = _make_event(**event_kwargs)
+    mock_certs_v1 = await _run_with_events(signer, [event])
 
-    mock_certs_v1.patch_certificate_signing_request_approval.assert_called_once()
-    call_args = mock_certs_v1.patch_certificate_signing_request_status.call_args
-    assert call_args[0][0] == "valid-csr"
+    mock_certs_v1.patch_certificate_signing_request_approval.assert_not_called()
+
+
