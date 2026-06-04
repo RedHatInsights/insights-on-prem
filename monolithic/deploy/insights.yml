@@ -13,7 +13,7 @@ spec:
       serviceAccountName: insights-on-prem
       containers:
       - name: insights-on-prem
-        image: quay.io/jipapous/insights-on-prem-poc:latest
+        image: quay.io/ccxdev/insights-on-premise-poc:latest
         command: ["python", "-m", "app.main"]
         ports:
         - containerPort: 8443
@@ -48,7 +48,7 @@ spec:
       - name: tls
         emptyDir: {}
       imagePullSecrets:
-      - name: jipapous-insights-on-prem-pull-secret
+      - name: ccxdev-insights-on-prem-poc-pull-secret
   selector:
     matchLabels:
       app: insights-on-prem
