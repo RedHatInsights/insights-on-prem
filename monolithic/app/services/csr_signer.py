@@ -49,7 +49,7 @@ class CSRSigner:
         if (
             csr_obj.status
             and csr_obj.status.conditions
-            and "Approved" in {c.type for c in csr_obj.status.conditions}
+            and {"Approved", "Denied", "Failed"} & {c.type for c in csr_obj.status.conditions}
         ):
             return None
 

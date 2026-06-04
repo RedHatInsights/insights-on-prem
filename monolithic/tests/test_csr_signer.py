@@ -120,6 +120,7 @@ async def test_run_approves_and_signs_valid_csr():
         pytest.param(
             {"conditions": [MagicMock(type="Approved")]}, id="already_approved"
         ),
+        pytest.param({"conditions": [MagicMock(type="Denied")]}, id="denied"),
         pytest.param(
             {"username": "system:serviceaccount:default:hacker"}, id="unauthorized_user"
         ),
