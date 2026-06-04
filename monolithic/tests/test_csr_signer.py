@@ -117,7 +117,9 @@ async def test_run_approves_and_signs_valid_csr():
     [
         pytest.param({"event_type": "DELETED"}, id="deleted_event"),
         pytest.param({"certificate": b"some-cert-data"}, id="already_signed"),
-        pytest.param({"conditions": [MagicMock(type="Approved")]}, id="already_approved"),
+        pytest.param(
+            {"conditions": [MagicMock(type="Approved")]}, id="already_approved"
+        ),
         pytest.param(
             {"username": "system:serviceaccount:default:hacker"}, id="unauthorized_user"
         ),
@@ -130,5 +132,3 @@ async def test_run_skips_invalid_event(event_kwargs):
     mock_certs_v1 = await _run_with_events(signer, [event])
 
     mock_certs_v1.patch_certificate_signing_request_approval.assert_not_called()
-
-
