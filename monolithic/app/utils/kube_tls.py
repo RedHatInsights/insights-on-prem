@@ -253,7 +253,13 @@ def renew_ca_secret(
     secret.data["tls.key"] = base64.b64encode(new_key_pem).decode()
     secret.data["tls.crt"] = base64.b64encode(new_cert_pem + chain_pem).decode()
 
-    core_v1.replace_namespaced_secret(secret_name, namespace, secret)
+    try:
+        core_v1.replace_namespaced_secret(secret_name, namespace, secret)
+    except client.ApiException as e:
+        if e.status != 409:
+            raise
+        logger.info("CA %s was renewed by another replica, loading winner", secret_name)
+        return ensure_ca_secret(core_v1, namespace, secret_name, common_name)
     logger.info("Renewed CA %s with certificate chaining", secret_name)
 
     return new_key, new_cert
