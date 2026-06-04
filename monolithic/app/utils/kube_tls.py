@@ -148,6 +148,10 @@ def ensure_ca_secret(
         ca_cert = x509.load_pem_x509_certificate(
             base64.b64decode(secret.data["tls.crt"])
         )
+        now = datetime.datetime.now(datetime.timezone.utc)
+        if ca_cert.not_valid_after_utc <= now:
+            logger.warning("Existing CA secret %s is expired, renewing", secret_name)
+            return renew_ca_secret(core_v1, namespace, secret_name, common_name)
         logger.info("Loaded existing CA secret")
         return ca_key, ca_cert
     except client.ApiException as e:
