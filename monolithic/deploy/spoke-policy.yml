@@ -130,7 +130,6 @@ spec:
                       downloadEndpoint: https://insights-operator-proxy.openshift-insights.svc:8443/api/v2/cluster/%s/reports
                       downloadEndpointTechPreview: https://insights-operator-proxy.openshift-insights.svc:8443/api/v2/cluster/%s/request/%s/report
                       processingStatusEndpoint: https://insights-operator-proxy.openshift-insights.svc:8443/api/v2/cluster/%s/request/%s/status
-                      interval: 0h1m0s
             - complianceType: musthave
               objectDefinition:
                 apiVersion: config.openshift.io/v1
