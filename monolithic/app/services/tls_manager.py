@@ -131,6 +131,10 @@ class TLSManager:
         except client.ApiException as e:
             if e.status != 409:
                 raise
+            existing = self.core_v1.read_namespaced_config_map(
+                SERVICE_CA_CONFIGMAP, self.namespace
+            )
+            cm.metadata.resource_version = existing.metadata.resource_version
             self.core_v1.replace_namespaced_config_map(
                 SERVICE_CA_CONFIGMAP, self.namespace, cm
             )
