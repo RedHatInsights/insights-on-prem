@@ -99,9 +99,9 @@ class CSRSigner:
 
     def _process_csr(self, certs_v1, csr_obj):
         csr_name = csr_obj.metadata.name
-        self._approve_csr(certs_v1, csr_name)
         csr_pem = base64.b64decode(csr_obj.spec.request)
         signed_cert_pem = self._sign_csr(csr_pem)
+        self._approve_csr(certs_v1, csr_name)
         certs_v1.patch_certificate_signing_request_status(
             csr_name,
             body={
