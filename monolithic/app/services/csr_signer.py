@@ -79,7 +79,9 @@ class CSRSigner:
 
     @staticmethod
     def _approve_csr(certs_v1: client.CertificatesV1Api, csr_name: str):
-        now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = datetime.datetime.now(datetime.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
         certs_v1.patch_certificate_signing_request_approval(
             csr_name,
             body={
