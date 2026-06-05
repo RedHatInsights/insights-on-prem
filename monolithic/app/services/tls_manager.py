@@ -198,7 +198,9 @@ class TLSManager:
         remove_expired_cas(self.core_v1, self.namespace, SERVER_CA_NAME)
         remove_expired_cas(self.core_v1, self.namespace, CLIENT_CA_NAME)
         self.write_client_ca_bundle()
-        server_ca_rotated = self.server_ca_cert.serial_number != old_server_ca_cert.serial_number
+        server_ca_rotated = (
+            self.server_ca_cert.serial_number != old_server_ca_cert.serial_number
+        )
         self.ensure_server_cert(force=server_ca_rotated)
 
     async def run_renewal(self):
