@@ -444,7 +444,7 @@ def start_server():
 
     if not config.mtls_enabled:
         logging.info("MTLS_ENABLED is not set, starting in plain HTTP mode")
-        config = uvicorn.Config("app.main:app", host="0.0.0.0", port=8080)
+        config = uvicorn.Config(app, host="0.0.0.0", port=8080)
         uvicorn.Server(config).run()
         return
 
@@ -459,7 +459,7 @@ def start_server():
     app.state.tls_manager = tls_mgr
 
     config = uvicorn.Config(
-        "app.main:app",
+        app,
         host="0.0.0.0",
         port=8443,
         ssl_keyfile=os.path.join(TLS_DIR, "tls.key"),
