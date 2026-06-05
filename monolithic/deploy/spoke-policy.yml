@@ -75,7 +75,7 @@ spec:
                       protocol: TCP
                       name: https
 
-    # --- Hub service CA (for verifying the hub's server cert) ---
+    # --- Hub server CA (HAProxy verifies hub's server cert with this) ---
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
@@ -95,6 +95,17 @@ spec:
                 data:
                   ca-bundle.crt: |
                     {{hub fromConfigMap "insights-on-prem-poc" "insights-on-prem-service-ca" "ca-bundle.crt" | autoindent hub}}
+
+    # --- Service CA trust (insights-operator trusts HAProxy's serving cert) ---
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: insights-operator-proxy-service-ca-trust
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
             - complianceType: musthave
               objectDefinition:
                 apiVersion: v1
