@@ -97,6 +97,9 @@ spec:
                     {{hub fromConfigMap "insights-on-prem-poc" "insights-on-prem-service-ca" "ca-bundle.crt" | autoindent hub}}
 
     # --- Service CA trust (insights-operator trusts HAProxy's serving cert) ---
+    # Merges the spoke's service-ca into the existing Proxy trustedCA ConfigMap
+    # (if one exists) instead of overriding the reference. If no trustedCA is
+    # configured, creates a new ConfigMap and sets the Proxy reference.
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
@@ -105,7 +108,26 @@ spec:
         spec:
           remediationAction: enforce
           severity: medium
-          object-templates:
+          object-templates-raw: |
+            {{- $ourCA := fromConfigMap "openshift-insights" "service-ca-bundle" "service-ca.crt" }}
+            {{- $proxy := (lookup "config.openshift.io/v1" "Proxy" "" "cluster") }}
+            {{- $cmName := $proxy.spec.trustedCA.name | default "" }}
+            {{- if and (ne $cmName "") (ne $cmName "insights-on-prem-service-ca") }}
+              {{- $existing := fromConfigMap "openshift-config" $cmName "ca-bundle.crt" | default "" }}
+              {{- if not (contains $ourCA $existing) }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: ConfigMap
+                metadata:
+                  name: '{{ $cmName }}'
+                  namespace: openshift-config
+                data:
+                  ca-bundle.crt: |
+                    {{ $existing | autoindent }}
+                    {{ $ourCA | autoindent }}
+              {{- end }}
+            {{- else if eq $cmName "" }}
             - complianceType: musthave
               objectDefinition:
                 apiVersion: v1
@@ -115,7 +137,17 @@ spec:
                   namespace: openshift-config
                 data:
                   ca-bundle.crt: |
-                    {{ fromConfigMap "openshift-insights" "service-ca-bundle" "service-ca.crt" | autoindent }}
+                    {{ $ourCA | autoindent }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: config.openshift.io/v1
+                kind: Proxy
+                metadata:
+                  name: cluster
+                spec:
+                  trustedCA:
+                    name: insights-on-prem-service-ca
+            {{- end }}
 
     # --- Insights Operator configuration ---
     - objectDefinition:
@@ -141,15 +173,6 @@ spec:
                       downloadEndpoint: https://insights-operator-proxy.openshift-insights.svc:8443/api/v2/cluster/%s/reports
                       downloadEndpointTechPreview: https://insights-operator-proxy.openshift-insights.svc:8443/api/v2/cluster/%s/request/%s/report
                       processingStatusEndpoint: https://insights-operator-proxy.openshift-insights.svc:8443/api/v2/cluster/%s/request/%s/status
-            - complianceType: musthave
-              objectDefinition:
-                apiVersion: config.openshift.io/v1
-                kind: Proxy
-                metadata:
-                  name: cluster
-                spec:
-                  trustedCA:
-                    name: insights-on-prem-service-ca
 ---
 apiVersion: cluster.open-cluster-management.io/v1beta2
 kind: ManagedClusterSetBinding
