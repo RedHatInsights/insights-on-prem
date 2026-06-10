@@ -41,7 +41,7 @@ spec:
                       - |
                         cat /certs/server/tls.crt /certs/server/tls.key > /tmp/server.pem &&
                         cat /managed/open-cluster-management.io-insights-on-prem-signer/tls.crt /managed/open-cluster-management.io-insights-on-prem-signer/tls.key > /tmp/client.pem &&
-                        sha256sum /managed/open-cluster-management.io-insights-on-prem-signer/tls.crt > /tmp/.cert-hash &&
+                        sha256sum /managed/open-cluster-management.io-insights-on-prem-signer/tls.crt /certs/hub-ca/ca-bundle.crt > /tmp/.cert-hash &&
                         haproxy -f /usr/local/etc/haproxy/haproxy.cfg
                     ports:
                       - containerPort: 8443
