@@ -1,0 +1,7 @@
+apiVersion: addon.open-cluster-management.io/v1alpha1
+kind: AddOnDeploymentConfig
+metadata:
+  name: insights-operator-proxy
+  namespace: insights-on-prem-poc
+spec:
+  agentInstallNamespace: openshift-insights

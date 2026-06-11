@@ -1,0 +1,55 @@
+apiVersion: addon.open-cluster-management.io/v1alpha1
+kind: AddOnTemplate
+metadata:
+  name: insights-operator-proxy
+spec:
+  addonName: insights-operator-proxy
+  agentSpec:
+    workload:
+      manifests:
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: insights-operator-proxy
+            namespace: openshift-insights
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: insights-operator-proxy
+            template:
+              metadata:
+                labels:
+                  app: insights-operator-proxy
+              spec:
+                containers:
+                  - name: haproxy
+                    image: docker.io/haproxy:lts-alpine
+                    command: ["sh", "-c"]
+                    args:
+                      - |
+                        cat /certs/server/tls.crt /certs/server/tls.key > /tmp/server.pem &&
+                        sha256sum /certs/server/tls.crt > /tmp/.cert-hash &&
+                        haproxy -f /usr/local/etc/haproxy/haproxy.cfg
+                    ports:
+                      - containerPort: 8443
+                        protocol: TCP
+                    livenessProbe:
+                      exec:
+                        command: ["sh", "-c", "sha256sum -c /tmp/.cert-hash"]
+                      initialDelaySeconds: 10
+                      periodSeconds: 30
+                    volumeMounts:
+                      - name: server-cert
+                        mountPath: /certs/server
+                        readOnly: true
+                      - name: haproxy-config
+                        mountPath: /usr/local/etc/haproxy
+                        readOnly: true
+                volumes:
+                  - name: server-cert
+                    secret:
+                      secretName: insights-operator-proxy-tls
+                  - name: haproxy-config
+                    configMap:
+                      name: insights-operator-proxy-config

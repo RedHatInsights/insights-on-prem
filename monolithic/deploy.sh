@@ -16,32 +16,42 @@ oc apply -f deploy/ccxdev-insights-on-prem-poc-secret.yml --namespace insights-o
 echo "4. Setting up ServiceAccount for Thanos access..."
 oc apply -f deploy/serviceaccount.yml
 
-echo "5. Deploying application..."
-oc apply -f deploy/insights.yml --namespace insights-on-prem-poc
-
-echo "6. Creating service..."
+echo "5. Creating service..."
 oc apply -f deploy/service.yml --namespace insights-on-prem-poc
 
-echo "7. Configuring OpenShift insights-operator..."
-# Apply insights-operator ConfigMap to redirect uploads to on-premise service
-oc apply -f deploy/insights-config.yml
-oc rollout restart -n openshift-insights deployment insights-operator
+echo "6. Deploying application..."
+oc apply -f deploy/insights.yml --namespace insights-on-prem-poc
 
-echo "8. Pausing MultiClusterHub operator..."
+echo "7. Creating Route for spoke access..."
+oc apply -f deploy/route.yml --namespace insights-on-prem-poc
+
+echo "8. Deploying OCM addon template..."
+oc apply -f deploy/addon-template.yml
+
+echo "9. Deploying OCM addon deployment config..."
+oc apply -f deploy/addon-deployment-config.yml
+
+echo "10. Deploying OCM addon registration..."
+oc apply -f deploy/addon-registration.yml
+
+echo "11. Deploying spoke policy (proxy manifests via hub templates)..."
+oc apply -f deploy/spoke-policy.yml
+
+echo "12. Pausing MultiClusterHub operator..."
 # Pause the operator to prevent it from reverting our changes in insights-client deployment
 oc annotate multiclusterhub multiclusterhub -n open-cluster-management mch-pause=true --overwrite
 
-echo "9. Configuring ACM insights-client..."
+echo "13. Configuring ACM insights-client..."
 # Update the CCX_SERVER environment variable to point to on-premise service
 # Also, set insights-client poll interval to 1 minute for demo purposes
 oc set env deployment/insights-client -n open-cluster-management \
   CCX_SERVER=http://insights-on-prem.insights-on-prem-poc.svc.cluster.local:8000/api/v2 \
   POLL_INTERVAL=1
 
-echo "10. Waiting for insights-client to roll out..."
+echo "14. Waiting for insights-client to roll out..."
 oc rollout status deployment/insights-client -n open-cluster-management --timeout=120s
 
-echo "11. Configuring ACM console for upgrade risk predictions..."
+echo "15. Configuring ACM console for upgrade risk predictions..."
 # The ACM console hardcodes console.redhat.com for URP — deploy a custom image that
 # reads UPGRADE_RISKS_PREDICTION_URL env var instead (see README for details).
 # Must be done AFTER pausing MCH (step 8), otherwise MCH reverts the image.
