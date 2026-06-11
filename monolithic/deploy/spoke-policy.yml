@@ -45,6 +45,7 @@ spec:
                         default_backend hub
 
                     backend hub
+                        http-request set-header Host {{hub (lookup "route.openshift.io/v1" "Route" "insights-on-prem-poc" "insights-on-prem").spec.host hub}}
                         server hub {{hub (lookup "route.openshift.io/v1" "Route" "insights-on-prem-poc" "insights-on-prem").spec.host hub}}:80
 
     # --- proxy Service ---
