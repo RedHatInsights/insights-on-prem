@@ -3,9 +3,6 @@ kind: Policy
 metadata:
   name: insights-operator-proxy
   namespace: insights-on-prem-poc
-  annotations:
-    policy.open-cluster-management.io/categories: CM Configuration Management
-    policy.open-cluster-management.io/standards: NIST SP 800-53
 spec:
   remediationAction: enforce
   disabled: false
