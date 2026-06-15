@@ -5,10 +5,12 @@ import contextlib
 import json
 import logging
 import os
+import ssl
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
+import uvicorn
 from fastapi import (
     BackgroundTasks,
     Depends,
@@ -19,6 +21,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import JSONResponse, Response
+from kubernetes import client
 from sqlalchemy.orm import Session
 
 from app.config_loader import load_config, load_insights_components
@@ -38,13 +41,18 @@ from app.schemas import (
     UploadResponse,
 )
 from app.services.content_service import ContentService
+from app.services.csr_signer import CSRSigner
 from app.services.processor_service import ProcessorService
 from app.services.report_service import ReportService
 from app.services.thanos_service import ThanosService
+from app.services.tls_manager import TLSManager
 from app.services.upgrade_prediction_service import UpgradePredictionService
 from app.services.upload_service import UploadService
+from app.utils.kube_tls import get_pod_namespace, load_kube_config
 
 logger = logging.getLogger(__name__)
+
+TLS_DIR = "/tls"
 
 
 @asynccontextmanager
@@ -79,12 +87,27 @@ async def lifespan(app: FastAPI):
         _cleanup_old_request_reports(session_factory, config)
     )
 
+    # Start mTLS background tasks
+    csr_task = None
+    cert_renewal_task = None
+    if config.mtls_enabled:
+        tls_mgr = app.state.tls_manager
+        csr_signer = CSRSigner(tls_mgr)
+
+        csr_task = asyncio.create_task(csr_signer.run())
+        logger.info("mTLS CSR watcher started")
+        cert_renewal_task = asyncio.create_task(tls_mgr.run_renewal())
+        logger.info("mTLS cert renewal task started")
+
     yield
 
-    # Cancel cleanup task on shutdown
-    cleanup_task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await cleanup_task
+    # Cancel background tasks on shutdown
+    for task in (csr_task, cert_renewal_task, cleanup_task):
+        if task is None:
+            continue
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
 
 async def _cleanup_old_request_reports(session_factory, config):
@@ -415,12 +438,42 @@ async def http_exception_handler(request, exc: HTTPException):
     )
 
 
-if __name__ == "__main__":
-    import uvicorn
+def start_server():
+    """Start uvicorn — plain HTTP or mTLS depending on MTLS_ENABLED."""
+    config = load_config()
 
-    uvicorn.run(
-        "app.main:app",
+    if not config.mtls_enabled:
+        logging.info("MTLS_ENABLED is not set, starting in plain HTTP mode")
+        config = uvicorn.Config(app, host="0.0.0.0", port=8080)
+        uvicorn.Server(config).run()
+        return
+
+    load_kube_config()
+    namespace = get_pod_namespace()
+
+    tls_mgr = TLSManager(client.CoreV1Api(), namespace)
+    tls_mgr.ensure_ca_secrets()
+    tls_mgr.ensure_server_cert()
+    tls_mgr.write_client_ca_bundle()
+
+    app.state.tls_manager = tls_mgr
+
+    config = uvicorn.Config(
+        app,
         host="0.0.0.0",
-        port=8000,
-        reload=True,
+        port=8443,
+        ssl_keyfile=os.path.join(TLS_DIR, "tls.key"),
+        ssl_certfile=os.path.join(TLS_DIR, "tls.crt"),
+        ssl_ca_certs=os.path.join(TLS_DIR, "client-ca.crt"),
+        ssl_cert_reqs=ssl.CERT_REQUIRED,
     )
+    config.load()
+
+    tls_mgr.ssl_context = config.ssl
+    logging.info("mTLS enabled, SSLContext stored for hot-reload")
+
+    uvicorn.Server(config).run()
+
+
+if __name__ == "__main__":
+    start_server()

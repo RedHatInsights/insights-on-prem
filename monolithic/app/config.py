@@ -38,6 +38,9 @@ class AppConfig:
     plugin_packages: list[str] = field(default_factory=list)
     plugin_configs: list[dict] = field(default_factory=list)
 
+    mtls_enabled: bool = False
+    cert_renewal_check_interval_hours: int = 12
+
     @property
     def database_url(self) -> str:
         """Construct PostgreSQL connection URL from components."""
@@ -66,6 +69,8 @@ _ENV_OVERRIDES = {
         "request_report_cleanup_interval_minutes",
         int,
     ),
+    "MTLS_ENABLED": ("mtls_enabled", lambda v: v.lower() in ("true", "1", "yes")),
+    "CERT_RENEWAL_CHECK_INTERVAL_HOURS": ("cert_renewal_check_interval_hours", int),
 }
 
 

@@ -3,6 +3,9 @@ kind: Policy
 metadata:
   name: insights-operator-proxy
   namespace: insights-on-prem-poc
+  annotations:
+    policy.open-cluster-management.io/categories: CM Configuration Management
+    policy.open-cluster-management.io/standards: NIST SP 800-53
 spec:
   remediationAction: enforce
   disabled: false
@@ -42,8 +45,7 @@ spec:
                         default_backend hub
 
                     backend hub
-                        http-request set-header Host {{hub (lookup "route.openshift.io/v1" "Route" "insights-on-prem-poc" "insights-on-prem").spec.host hub}}
-                        server hub {{hub (lookup "route.openshift.io/v1" "Route" "insights-on-prem-poc" "insights-on-prem").spec.host hub}}:80
+                        server hub {{hub (lookup "route.openshift.io/v1" "Route" "insights-on-prem-poc" "insights-on-prem").spec.host hub}}:443 ssl crt /tmp/client.pem ca-file /certs/hub-ca/ca-bundle.crt verify required sni str({{hub (lookup "route.openshift.io/v1" "Route" "insights-on-prem-poc" "insights-on-prem").spec.host hub}})
 
     # --- proxy Service ---
     - objectDefinition:
@@ -72,6 +74,27 @@ spec:
                       targetPort: 8443
                       protocol: TCP
                       name: https
+
+    # --- Hub server CA (HAProxy verifies hub's server cert with this) ---
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: insights-operator-proxy-hub-ca
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: ConfigMap
+                metadata:
+                  name: insights-operator-proxy-hub-ca
+                  namespace: openshift-insights
+                data:
+                  ca-bundle.crt: |
+                    {{hub fromConfigMap "insights-on-prem-poc" "insights-on-prem-service-ca" "ca-bundle.crt" | autoindent hub}}
 
     # --- Service CA trust (insights-operator trusts HAProxy's serving cert) ---
     # Merges the spoke's service-ca into the existing Proxy trustedCA ConfigMap

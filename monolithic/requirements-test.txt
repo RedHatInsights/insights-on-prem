@@ -17,6 +17,10 @@ insights-core>=3.2.26
 # HTTP client
 httpx>=0.25.0
 
+# TLS / certificate handling
+cryptography>=42.0.0
+kubernetes>=28.1.0
+
 # Configuration and utilities
 pydantic>=2.5.0
 pyyaml>=6.0.0

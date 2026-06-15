@@ -22,14 +22,14 @@ oc apply -f deploy/service.yml --namespace insights-on-prem-poc
 echo "6. Deploying application..."
 oc apply -f deploy/insights.yml --namespace insights-on-prem-poc
 
-echo "7. Creating Route for spoke access..."
+echo "7. Creating passthrough Route for spoke access..."
 oc apply -f deploy/route.yml --namespace insights-on-prem-poc
 oc wait --for=jsonpath='{.spec.host}' route/insights-on-prem -n insights-on-prem-poc --timeout=30s
 
 echo "8. Creating Placement for managed clusters..."
 oc apply -f deploy/placement.yml
 
-echo "9. Deploying OCM addon template..."
+echo "9. Deploying OCM addon template (CSR registration)..."
 oc apply -f deploy/addon-template.yml
 
 echo "10. Deploying OCM addon deployment config..."
@@ -49,7 +49,7 @@ echo "14. Configuring ACM insights-client..."
 # Update the CCX_SERVER environment variable to point to on-premise service
 # Also, set insights-client poll interval to 1 minute for demo purposes
 oc set env deployment/insights-client -n open-cluster-management \
-  CCX_SERVER=http://insights-on-prem.insights-on-prem-poc.svc.cluster.local:8000/api/v2 \
+  CCX_SERVER=https://insights-on-prem.insights-on-prem-poc.svc.cluster.local:8443/api/v2 \
   POLL_INTERVAL=1
 
 echo "15. Waiting for insights-client to roll out..."
