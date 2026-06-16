@@ -154,10 +154,10 @@ spec:
 apiVersion: cluster.open-cluster-management.io/v1beta2
 kind: ManagedClusterSetBinding
 metadata:
-  name: default
+  name: global
   namespace: insights-on-prem-poc
 spec:
-  clusterSet: default
+  clusterSet: global
 ---
 apiVersion: cluster.open-cluster-management.io/v1beta1
 kind: Placement
