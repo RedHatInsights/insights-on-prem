@@ -168,12 +168,6 @@ spec:
   tolerations:
     - key: cluster.open-cluster-management.io/unreachable
       operator: Exists
-  predicates:
-    - requiredClusterSelector:
-        labelSelector:
-          matchExpressions:
-            - key: vendor
-              operator: Exists
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding
