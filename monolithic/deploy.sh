@@ -25,36 +25,39 @@ oc apply -f deploy/insights.yml --namespace insights-on-prem-poc
 echo "7. Creating Route for spoke access..."
 oc apply -f deploy/route.yml --namespace insights-on-prem-poc
 
-echo "8. Deploying OCM addon template..."
+echo "8. Creating Placement for managed clusters..."
+oc apply -f deploy/placement.yml
+
+echo "9. Deploying OCM addon template..."
 oc apply -f deploy/addon-template.yml
 
-echo "9. Deploying OCM addon deployment config..."
+echo "10. Deploying OCM addon deployment config..."
 oc apply -f deploy/addon-deployment-config.yml
 
-echo "10. Deploying OCM addon registration..."
+echo "11. Deploying OCM addon registration..."
 oc apply -f deploy/addon-registration.yml
 
-echo "11. Deploying spoke policy (proxy manifests via hub templates)..."
+echo "12. Deploying spoke policy (proxy manifests via hub templates)..."
 oc apply -f deploy/spoke-policy.yml
 
-echo "12. Pausing MultiClusterHub operator..."
+echo "13. Pausing MultiClusterHub operator..."
 # Pause the operator to prevent it from reverting our changes in insights-client deployment
 oc annotate multiclusterhub multiclusterhub -n open-cluster-management mch-pause=true --overwrite
 
-echo "13. Configuring ACM insights-client..."
+echo "14. Configuring ACM insights-client..."
 # Update the CCX_SERVER environment variable to point to on-premise service
 # Also, set insights-client poll interval to 1 minute for demo purposes
 oc set env deployment/insights-client -n open-cluster-management \
   CCX_SERVER=http://insights-on-prem.insights-on-prem-poc.svc.cluster.local:8000/api/v2 \
   POLL_INTERVAL=1
 
-echo "14. Waiting for insights-client to roll out..."
+echo "15. Waiting for insights-client to roll out..."
 oc rollout status deployment/insights-client -n open-cluster-management --timeout=120s
 
-echo "15. Configuring ACM console for upgrade risk predictions..."
+echo "16. Configuring ACM console for upgrade risk predictions..."
 # The ACM console hardcodes console.redhat.com for URP — deploy a custom image that
 # reads UPGRADE_RISKS_PREDICTION_URL env var instead (see README for details).
-# Must be done AFTER pausing MCH (step 12), otherwise MCH reverts the image.
+# Must be done AFTER pausing MCH (step 13), otherwise MCH reverts the image.
 # Reuse the existing pull secret (same ccxdev+insights_on_prem_poc robot account).
 # Copy it to open-cluster-management so the console deployment can pull the image.
 oc get secret ccxdev-insights-on-prem-poc-pull-secret -n insights-on-prem-poc -o json | \

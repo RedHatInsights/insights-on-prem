@@ -151,31 +151,13 @@ spec:
                       downloadEndpointTechPreview: https://insights-operator-proxy.openshift-insights.svc:8443/api/v2/cluster/%s/request/%s/report
                       processingStatusEndpoint: https://insights-operator-proxy.openshift-insights.svc:8443/api/v2/cluster/%s/request/%s/status
 ---
-apiVersion: cluster.open-cluster-management.io/v1beta2
-kind: ManagedClusterSetBinding
-metadata:
-  name: global
-  namespace: insights-on-prem-poc
-spec:
-  clusterSet: global
----
-apiVersion: cluster.open-cluster-management.io/v1beta1
-kind: Placement
-metadata:
-  name: insights-operator-proxy-spokes
-  namespace: insights-on-prem-poc
-spec:
-  tolerations:
-    - key: cluster.open-cluster-management.io/unreachable
-      operator: Exists
----
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding
 metadata:
   name: insights-operator-proxy
   namespace: insights-on-prem-poc
 placementRef:
-  name: insights-operator-proxy-spokes
+  name: all-managed-clusters
   apiGroup: cluster.open-cluster-management.io
   kind: Placement
 subjects:

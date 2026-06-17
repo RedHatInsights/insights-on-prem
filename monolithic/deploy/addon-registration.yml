@@ -18,20 +18,9 @@ spec:
   installStrategy:
     type: Placements
     placements:
-      - name: all-managed-clusters
+      - name: insights-operator-proxy-spokes
         namespace: insights-on-prem-poc
         configs:
           - group: addon.open-cluster-management.io
             resource: addontemplates
             name: insights-operator-proxy
----
-# Selects all managed clusters for insights-operator-proxy addon deployment
-apiVersion: cluster.open-cluster-management.io/v1beta1
-kind: Placement
-metadata:
-  name: all-managed-clusters
-  namespace: insights-on-prem-poc
-spec:
-  tolerations:
-    - key: cluster.open-cluster-management.io/unreachable
-      operator: Exists
