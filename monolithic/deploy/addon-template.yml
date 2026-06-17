@@ -31,6 +31,13 @@ spec:
                         cat /certs/server/tls.crt /certs/server/tls.key > /tmp/server.pem &&
                         sha256sum /certs/server/tls.crt > /tmp/.cert-hash &&
                         haproxy -f /usr/local/etc/haproxy/haproxy.cfg
+                    resources:
+                      requests:
+                        cpu: 100m
+                        memory: 128Mi
+                      limits:
+                        cpu: 300m
+                        memory: 512Mi
                     ports:
                       - containerPort: 8443
                         protocol: TCP
