@@ -7,7 +7,7 @@ spec:
     app: insights-on-prem
   ports:
   - protocol: TCP
-    port: 8000
-    targetPort: 8000
-    name: http
+    port: 8443
+    targetPort: 8443
+    name: https
   type: ClusterIP

@@ -1,0 +1,104 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cert-manager-operator
+---
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: cert-manager-operator
+  namespace: cert-manager-operator
+spec:
+  targetNamespaces:
+    - cert-manager-operator
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: openshift-cert-manager-operator
+  namespace: cert-manager-operator
+spec:
+  channel: stable-v1
+  name: openshift-cert-manager-operator
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+---
+# Bootstrap: self-signed issuer to create the CA certs
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-bootstrap
+spec:
+  selfSigned: {}
+---
+# Server CA — signs the hub's server certificate
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: insights-on-prem-server-ca
+  namespace: insights-on-prem-poc
+spec:
+  isCA: true
+  secretName: insights-on-prem-server-ca
+  commonName: insights-on-prem-server-ca
+  duration: 87600h # 10 years
+  renewBefore: 8760h # 1 year
+  privateKey:
+    algorithm: RSA
+    size: 4096
+  issuerRef:
+    name: selfsigned-bootstrap
+    kind: ClusterIssuer
+---
+# Client CA — signs spoke client certs (via OCM CustomSigner)
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: insights-on-prem-client-ca
+  namespace: insights-on-prem-poc
+spec:
+  isCA: true
+  secretName: insights-on-prem-client-ca
+  commonName: insights-on-prem-client-ca
+  duration: 87600h
+  renewBefore: 8760h
+  privateKey:
+    algorithm: RSA
+    size: 4096
+  issuerRef:
+    name: selfsigned-bootstrap
+    kind: ClusterIssuer
+---
+# Issuer that uses the server CA to sign leaf certs
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: insights-on-prem-server-issuer
+  namespace: insights-on-prem-poc
+spec:
+  ca:
+    secretName: insights-on-prem-server-ca
+---
+# Server leaf certificate — SANs are templated by deploy.sh
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: insights-on-prem-server-cert
+  namespace: insights-on-prem-poc
+spec:
+  secretName: insights-on-prem-server-tls
+  duration: 8760h # 1 year
+  renewBefore: 720h # 30 days
+  commonName: insights-on-prem.insights-on-prem-poc.svc
+  dnsNames:
+    - insights-on-prem.insights-on-prem-poc.svc
+    - insights-on-prem.insights-on-prem-poc.svc.cluster.local
+    - ROUTE_HOSTNAME
+  privateKey:
+    algorithm: RSA
+    size: 2048
+  usages:
+    - server auth
+  issuerRef:
+    name: insights-on-prem-server-issuer
+    kind: Issuer

@@ -4,7 +4,9 @@ metadata:
   name: insights-on-prem
 spec:
   port:
-    targetPort: http
+    targetPort: https
+  tls:
+    termination: passthrough
   to:
     kind: Service
     name: insights-on-prem

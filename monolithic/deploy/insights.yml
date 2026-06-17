@@ -14,11 +14,21 @@ spec:
       containers:
       - name: insights-on-prem
         image: quay.io/ccxdev/insights-on-premise-poc:latest
+        command: ["python", "-m", "app.main"]
         ports:
-        - containerPort: 8000
-          name: http
+        - containerPort: 8443
+          name: https
           protocol: TCP
+        volumeMounts:
+        - name: server-cert
+          mountPath: /tls
+          readOnly: true
+        - name: client-ca
+          mountPath: /tls/client-ca
+          readOnly: true
         env:
+        - name: MTLS_ENABLED
+          value: "true"
         - name: POSTGRES_HOST
           value: "insights-postgres"
         - name: POSTGRES_PORT
@@ -38,6 +48,16 @@ spec:
             secretKeyRef:
               name: insights-postgres
               key: database-name
+      volumes:
+      - name: server-cert
+        secret:
+          secretName: insights-on-prem-server-tls
+      - name: client-ca
+        secret:
+          secretName: insights-on-prem-client-ca
+          items:
+          - key: tls.crt
+            path: ca.crt
       imagePullSecrets:
       - name: ccxdev-insights-on-prem-poc-pull-secret
   selector:

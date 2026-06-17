@@ -5,9 +5,13 @@ import contextlib
 import json
 import logging
 import os
+import ssl
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+
+import uvicorn
+from watchfiles import awatch
 
 from fastapi import (
     BackgroundTasks,
@@ -79,12 +83,21 @@ async def lifespan(app: FastAPI):
         _cleanup_old_request_reports(session_factory, config)
     )
 
+    # Watch for certificate changes and hot-reload the SSLContext
+    cert_watcher_task = None
+    if hasattr(app.state, "ssl_context"):
+        cert_watcher_task = asyncio.create_task(
+            _watch_certs(app.state.ssl_context)
+        )
+
     yield
 
-    # Cancel cleanup task on shutdown
-    cleanup_task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await cleanup_task
+    for task in (cleanup_task, cert_watcher_task):
+        if task is None:
+            continue
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
 
 async def _cleanup_old_request_reports(session_factory, config):
@@ -415,12 +428,53 @@ async def http_exception_handler(request, exc: HTTPException):
     )
 
 
-if __name__ == "__main__":
-    import uvicorn
+TLS_DIR = "/tls"
+TLS_CERT = os.path.join(TLS_DIR, "tls.crt")
+TLS_KEY = os.path.join(TLS_DIR, "tls.key")
+CLIENT_CA_PATH = "/tls/client-ca/ca.crt"
 
-    uvicorn.run(
-        "app.main:app",
+
+async def _watch_certs(ssl_context: ssl.SSLContext):
+    """Watch TLS cert files and reload SSLContext when they change."""
+    async for _ in awatch(TLS_CERT, TLS_KEY, CLIENT_CA_PATH):
+        try:
+            ssl_context.load_cert_chain(TLS_CERT, TLS_KEY)
+            ssl_context.load_verify_locations(cafile=CLIENT_CA_PATH)
+            logger.info("Reloaded SSLContext with updated certificates")
+        except Exception:
+            logger.exception("Failed to reload certificates")
+
+
+def start_server():
+    """Start uvicorn — plain HTTP or mTLS depending on MTLS_ENABLED."""
+    config = load_config()
+
+    if not config.mtls_enabled:
+        uvi_config = uvicorn.Config(app, host="0.0.0.0", port=8000)
+        uvicorn.Server(uvi_config).run()
+        return
+
+    ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ssl_context.load_cert_chain(TLS_CERT, TLS_KEY)
+    ssl_context.load_verify_locations(cafile=CLIENT_CA_PATH)
+    ssl_context.verify_mode = ssl.CERT_REQUIRED
+
+    app.state.ssl_context = ssl_context
+
+    uvi_config = uvicorn.Config(
+        app,
         host="0.0.0.0",
-        port=8000,
-        reload=True,
+        port=8443,
+        ssl_keyfile=TLS_KEY,
+        ssl_certfile=TLS_CERT,
+        ssl_ca_certs=CLIENT_CA_PATH,
+        ssl_cert_reqs=ssl.CERT_REQUIRED,
     )
+    uvi_config.load()
+    uvi_config.ssl = ssl_context
+
+    uvicorn.Server(uvi_config).run()
+
+
+if __name__ == "__main__":
+    start_server()

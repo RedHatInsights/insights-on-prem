@@ -4,6 +4,17 @@ metadata:
   name: insights-operator-proxy
 spec:
   addonName: insights-operator-proxy
+  registration:
+    - type: CustomSigner
+      customSigner:
+        signerName: open-cluster-management.io/insights-on-prem-signer
+        subject:
+          user: managed-cluster-observability
+          groups:
+            - system:open-cluster-management:insights-operator-proxy
+        signingCA:
+          namespace: insights-on-prem-poc
+          name: insights-on-prem-client-ca
   agentSpec:
     workload:
       manifests:
@@ -33,7 +44,8 @@ spec:
                     args:
                       - |
                         cat /certs/server/tls.crt /certs/server/tls.key > /tmp/server.pem &&
-                        sha256sum /certs/server/tls.crt > /tmp/.cert-hash &&
+                        cat /managed/open-cluster-management.io-insights-on-prem-signer/tls.crt /managed/open-cluster-management.io-insights-on-prem-signer/tls.key > /tmp/client.pem &&
+                        sha256sum /certs/server/tls.crt /managed/open-cluster-management.io-insights-on-prem-signer/tls.crt /certs/hub-ca/ca-bundle.crt > /tmp/.cert-hash &&
                         haproxy -f /usr/local/etc/haproxy/haproxy.cfg
                     resources:
                       requests:
@@ -61,6 +73,9 @@ spec:
                       - name: server-cert
                         mountPath: /certs/server
                         readOnly: true
+                      - name: hub-ca
+                        mountPath: /certs/hub-ca
+                        readOnly: true
                       - name: haproxy-config
                         mountPath: /usr/local/etc/haproxy
                         readOnly: true
@@ -68,6 +83,9 @@ spec:
                   - name: server-cert
                     secret:
                       secretName: insights-operator-proxy-tls
+                  - name: hub-ca
+                    configMap:
+                      name: insights-operator-proxy-hub-ca
                   - name: haproxy-config
                     configMap:
                       name: insights-operator-proxy-config
