@@ -54,7 +54,7 @@ oc rollout status deployment/insights-client -n open-cluster-management --timeou
 echo "15. Configuring ACM console for upgrade risk predictions..."
 # The ACM console hardcodes console.redhat.com for URP — deploy a custom image that
 # reads UPGRADE_RISKS_PREDICTION_URL env var instead (see README for details).
-# Must be done AFTER pausing MCH (step 8), otherwise MCH reverts the image.
+# Must be done AFTER pausing MCH (step 12), otherwise MCH reverts the image.
 # Reuse the existing pull secret (same ccxdev+insights_on_prem_poc robot account).
 # Copy it to open-cluster-management so the console deployment can pull the image.
 oc get secret ccxdev-insights-on-prem-poc-pull-secret -n insights-on-prem-poc -o json | \
