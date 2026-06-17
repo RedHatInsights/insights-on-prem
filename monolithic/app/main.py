@@ -11,8 +11,6 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
 import uvicorn
-from watchfiles import awatch
-
 from fastapi import (
     BackgroundTasks,
     Depends,
@@ -24,6 +22,7 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
+from watchfiles import awatch
 
 from app.config_loader import load_config, load_insights_components
 from app.content_parser_yaml import YAMLContentParser
@@ -86,9 +85,7 @@ async def lifespan(app: FastAPI):
     # Watch for certificate changes and hot-reload the SSLContext
     cert_watcher_task = None
     if hasattr(app.state, "ssl_context"):
-        cert_watcher_task = asyncio.create_task(
-            _watch_certs(app.state.ssl_context)
-        )
+        cert_watcher_task = asyncio.create_task(_watch_certs(app.state.ssl_context))
 
     yield
 
@@ -434,9 +431,17 @@ TLS_KEY = os.path.join(TLS_DIR, "tls.key")
 CLIENT_CA_PATH = "/tls/client-ca/ca.crt"
 
 
+CLIENT_CA_DIR = "/tls/client-ca"
+
+
 async def _watch_certs(ssl_context: ssl.SSLContext):
-    """Watch TLS cert files and reload SSLContext when they change."""
-    async for _ in awatch(TLS_CERT, TLS_KEY, CLIENT_CA_PATH):
+    """Watch TLS cert directories and reload SSLContext when they change.
+
+    Kubernetes Secret volumes use symlinks (..data → timestamped dir).
+    Watching the directories catches the symlink swap that inotify on
+    individual files would miss.
+    """
+    async for _ in awatch(TLS_DIR, CLIENT_CA_DIR):
         try:
             ssl_context.load_cert_chain(TLS_CERT, TLS_KEY)
             ssl_context.load_verify_locations(cafile=CLIENT_CA_PATH)

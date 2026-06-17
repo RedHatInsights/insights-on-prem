@@ -102,3 +102,61 @@ spec:
   issuerRef:
     name: insights-on-prem-server-issuer
     kind: Issuer
+---
+# Hub-side Policy: keep the server CA ConfigMap in sync with the CA Secret.
+# The spoke policy reads the CA from this ConfigMap via fromConfigMap.
+# Runs on the hub (local-cluster) where lookup can access the Secret directly.
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: insights-on-prem-ca-sync
+  namespace: insights-on-prem-poc
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: insights-on-prem-ca-sync
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates-raw: |
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: ConfigMap
+                metadata:
+                  name: insights-on-prem-service-ca
+                  namespace: insights-on-prem-poc
+                data:
+                  ca-bundle.crt: |
+                    {{ index (lookup "v1" "Secret" "insights-on-prem-poc" "insights-on-prem-server-ca").data "tls.crt" | base64dec | autoindent }}
+---
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: insights-on-prem-hub-only
+  namespace: insights-on-prem-poc
+spec:
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            name: local-cluster
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: insights-on-prem-ca-sync
+  namespace: insights-on-prem-poc
+placementRef:
+  name: insights-on-prem-hub-only
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+subjects:
+  - name: insights-on-prem-ca-sync
+    apiGroup: policy.open-cluster-management.io
+    kind: Policy
