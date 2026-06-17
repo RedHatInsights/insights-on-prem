@@ -18,7 +18,7 @@ spec:
   installStrategy:
     type: Placements
     placements:
-      - name: insights-operator-proxy-spokes
+      - name: all-managed-clusters
         namespace: insights-on-prem-poc
         configs:
           - group: addon.open-cluster-management.io

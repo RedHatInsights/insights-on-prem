@@ -27,7 +27,7 @@ spec:
                 data:
                   haproxy.cfg: |
                     global
-                        log stdout format raw local0
+                        log stdout local0
 
                     defaults
                         mode http
@@ -89,7 +89,7 @@ spec:
             {{- $ourCA := fromConfigMap "openshift-insights" "service-ca-bundle" "service-ca.crt" }}
             {{- $proxy := (lookup "config.openshift.io/v1" "Proxy" "" "cluster") }}
             {{- $cmName := $proxy.spec.trustedCA.name | default "" }}
-            {{- if and (ne $cmName "") (ne $cmName "insights-on-prem-service-ca") }}
+            {{- if ne $cmName "" }}
               {{- $existing := fromConfigMap "openshift-config" $cmName "ca-bundle.crt" | default "" }}
               {{- if not (contains $ourCA $existing) }}
             - complianceType: musthave

@@ -24,7 +24,11 @@ spec:
               spec:
                 containers:
                   - name: haproxy
-                    image: docker.io/haproxy:lts-alpine
+                    image: registry.redhat.io/openshift4/ose-haproxy-router-rhel9:latest
+                    securityContext:
+                      capabilities:
+                        add:
+                          - NET_BIND_SERVICE
                     command: ["sh", "-c"]
                     args:
                       - |
