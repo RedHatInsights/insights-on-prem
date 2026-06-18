@@ -50,6 +50,8 @@ spec:
                         port: 8443
                       initialDelaySeconds: 5
                       periodSeconds: 10
+                    # Restarts the pod when cert SHA changes, as
+                    # HAProxy cannot hot-reload certificates.
                     livenessProbe:
                       exec:
                         command: ["sh", "-c", "sha256sum -c /tmp/.cert-hash"]
