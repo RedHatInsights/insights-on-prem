@@ -24,6 +24,7 @@ oc apply -f deploy/insights.yml --namespace insights-on-prem-poc
 
 echo "7. Creating Route for spoke access..."
 oc apply -f deploy/route.yml --namespace insights-on-prem-poc
+oc wait --for=jsonpath='{.spec.host}' route/insights-on-prem -n insights-on-prem-poc --timeout=30s
 
 echo "8. Creating Placement for managed clusters..."
 oc apply -f deploy/placement.yml
