@@ -86,14 +86,6 @@ oc rollout status deployment/insights-on-prem -n insights-on-prem-poc --timeout=
 echo ""
 echo "4. Exposing on-prem service via HTTPS route (required for console backend)..."
 # ---------------------------------------------------------------------------
-# The ACM console backend enforces HTTPS for outbound calls, so the on-prem service
-# must be reachable over HTTPS. This route is for testing only — in production the
-# addon would handle service exposure properly.
-oc create route edge insights-on-prem \
-  -n insights-on-prem-poc \
-  --service=insights-on-prem \
-  --port=8000 \
-  --insecure-policy=Redirect 2>/dev/null || true
 
 ON_PREM_ROUTE=$(oc get route insights-on-prem -n insights-on-prem-poc -o jsonpath='{.spec.host}')
 ON_PREM_URP_URL="https://${ON_PREM_ROUTE}/api/insights-results-aggregator/v2/upgrade-risks-prediction"
