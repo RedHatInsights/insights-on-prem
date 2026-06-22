@@ -1,0 +1,22 @@
+# Grant the insights-on-prem-poc namespace access to the global ClusterSet,
+# which contains all managed clusters. Required for the Placement below to
+# be able to select clusters.
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: global
+  namespace: insights-on-prem-poc
+spec:
+  clusterSet: global
+---
+# Select all managed clusters. Referenced by both the addon install strategy
+# (addon-registration.yml) and the spoke policy (spoke-policy.yml).
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: all-managed-clusters
+  namespace: insights-on-prem-poc
+spec:
+  tolerations:
+    - key: cluster.open-cluster-management.io/unreachable
+      operator: Exists
