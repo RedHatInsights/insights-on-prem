@@ -24,7 +24,7 @@ spec:
               spec:
                 containers:
                   - name: haproxy
-                    image: registry.redhat.io/openshift4/ose-haproxy-router-rhel9:latest
+                    image: registry.redhat.io/openshift4/ose-haproxy-router-rhel9:v4.16
                     securityContext:
                       capabilities:
                         add:
