@@ -1,18 +1,59 @@
 apiVersion: policy.open-cluster-management.io/v1
 kind: Policy
 metadata:
-  name: insights-operator-proxy
+  name: insights-on-prem-spoke-policy
   namespace: insights-on-prem-poc
 spec:
   remediationAction: enforce
   disabled: false
   policy-templates:
-    # --- HAProxy ConfigMap ---
+    # --- Skupper operator on spoke ---
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
         metadata:
-          name: insights-operator-proxy-config
+          name: insights-skupper-operator
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operators.coreos.com/v1alpha1
+                kind: Subscription
+                metadata:
+                  name: skupper-operator
+                  namespace: openshift-operators
+                spec:
+                  channel: stable-2
+                  name: skupper-operator
+                  source: redhat-operators
+                  sourceNamespace: openshift-marketplace
+
+    # --- Skupper Site on spoke ---
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: insights-skupper-site
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: skupper.io/v2alpha1
+                kind: Site
+                metadata:
+                  name: insights-on-prem
+                  namespace: openshift-insights
+
+    # --- Distribute Skupper token code to spokes (sensitive) ---
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: insights-skupper-token-secret
         spec:
           remediationAction: enforce
           severity: medium
@@ -20,37 +61,69 @@ spec:
             - complianceType: musthave
               objectDefinition:
                 apiVersion: v1
-                kind: ConfigMap
+                kind: Secret
                 metadata:
-                  name: insights-operator-proxy-config
+                  name: insights-on-prem-skupper-code
                   namespace: openshift-insights
+                type: Opaque
                 data:
-                  haproxy.cfg: |
-                    global
-                        log stdout local0
+                  code: '{{hub fromSecret "insights-on-prem-poc" "insights-on-prem-skupper-code" "code" hub}}'
 
-                    defaults
-                        mode http
-                        log global
-                        option httplog
-                        timeout connect 5s
-                        timeout client 30s
-                        timeout server 30s
-
-                    frontend proxy
-                        bind *:8443 ssl crt /tmp/server.pem
-                        default_backend hub
-
-                    backend hub
-                        http-request set-header Host {{hub (lookup "route.openshift.io/v1" "Route" "insights-on-prem-poc" "insights-on-prem").spec.host hub}}
-                        server hub {{hub (lookup "route.openshift.io/v1" "Route" "insights-on-prem-poc" "insights-on-prem").spec.host hub}}:80
-
-    # --- proxy Service ---
+    # --- Skupper AccessToken (links spoke to hub) ---
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
         metadata:
-          name: insights-operator-proxy-service
+          name: insights-skupper-access-token
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates-raw: |
+            {{- $code := (lookup "v1" "Secret" "openshift-insights" "insights-on-prem-skupper-code") }}
+            {{- if $code.data }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: skupper.io/v2alpha1
+                kind: AccessToken
+                metadata:
+                  name: insights-on-prem-hub
+                  namespace: openshift-insights
+                spec:
+                  url: '{{hub fromConfigMap "insights-on-prem-poc" "insights-on-prem-skupper-token" "url" hub}}'
+                  code: {{ index $code.data "code" | base64dec }}
+                  ca: |
+                    {{hub fromConfigMap "insights-on-prem-poc" "insights-on-prem-skupper-token" "ca" | autoindent hub}}
+            {{- end }}
+
+    # --- Skupper Listener (creates local Service for IO) ---
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: insights-skupper-listener
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: skupper.io/v2alpha1
+                kind: Listener
+                metadata:
+                  name: insights-on-prem
+                  namespace: openshift-insights
+                spec:
+                  routingKey: insights-on-prem
+                  host: insights-on-prem
+                  port: 8443
+                  tlsCredentials: insights-on-prem-tls
+
+    # --- Service annotation for TLS cert generation by service-ca ---
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: insights-skupper-service-tls
         spec:
           remediationAction: enforce
           severity: medium
@@ -60,20 +133,39 @@ spec:
                 apiVersion: v1
                 kind: Service
                 metadata:
-                  name: insights-operator-proxy
+                  name: insights-on-prem
                   namespace: openshift-insights
                   annotations:
-                    service.beta.openshift.io/serving-cert-secret-name: insights-operator-proxy-tls
-                spec:
-                  selector:
-                    app: insights-operator-proxy
-                  ports:
-                    - port: 8443
-                      targetPort: 8443
-                      protocol: TCP
-                      name: https
+                    service.beta.openshift.io/serving-cert-secret-name: insights-on-prem-serving-cert
 
-    # --- Service CA trust (insights-operator trusts HAProxy's serving cert) ---
+    # --- Assemble full TLS bundle for Skupper (cert + key + CA) ---
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: insights-skupper-tls-bundle
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates-raw: |
+            {{- $cert := (lookup "v1" "Secret" "openshift-insights" "insights-on-prem-serving-cert") }}
+            {{- $ca := fromConfigMap "openshift-insights" "service-ca-bundle" "service-ca.crt" }}
+            {{- if $cert.data }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Secret
+                metadata:
+                  name: insights-on-prem-tls
+                  namespace: openshift-insights
+                type: kubernetes.io/tls
+                data:
+                  tls.crt: '{{ index $cert.data "tls.crt" }}'
+                  tls.key: '{{ index $cert.data "tls.key" }}'
+                  ca.crt: '{{ $ca | base64enc }}'
+            {{- end }}
+
+    # --- Service CA trust (IO trusts the Skupper Listener's serving cert) ---
     # Merges the spoke's service-ca into the existing Proxy trustedCA ConfigMap
     # (if one exists) instead of overriding the reference. If no trustedCA is
     # configured, creates a new ConfigMap and sets the Proxy reference.
@@ -81,7 +173,7 @@ spec:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
         metadata:
-          name: insights-operator-proxy-service-ca-trust
+          name: insights-on-prem-spoke-policy-service-ca-trust
         spec:
           remediationAction: enforce
           severity: medium
@@ -131,7 +223,7 @@ spec:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
         metadata:
-          name: insights-operator-proxy-operator-config
+          name: insights-on-prem-spoke-policy-operator-config
         spec:
           remediationAction: enforce
           severity: medium
@@ -146,22 +238,22 @@ spec:
                 data:
                   config.yaml: |
                     dataReporting:
-                      uploadEndpoint: https://insights-operator-proxy.openshift-insights.svc:8443/api/ingress/v1/upload
-                      downloadEndpoint: https://insights-operator-proxy.openshift-insights.svc:8443/api/v2/cluster/%s/reports
-                      downloadEndpointTechPreview: https://insights-operator-proxy.openshift-insights.svc:8443/api/v2/cluster/%s/request/%s/report
-                      processingStatusEndpoint: https://insights-operator-proxy.openshift-insights.svc:8443/api/v2/cluster/%s/request/%s/status
+                      uploadEndpoint: https://insights-on-prem.openshift-insights.svc:8443/api/ingress/v1/upload
+                      downloadEndpoint: https://insights-on-prem.openshift-insights.svc:8443/api/v2/cluster/%s/reports
+                      downloadEndpointTechPreview: https://insights-on-prem.openshift-insights.svc:8443/api/v2/cluster/%s/request/%s/report
+                      processingStatusEndpoint: https://insights-on-prem.openshift-insights.svc:8443/api/v2/cluster/%s/request/%s/status
                       interval: 0h1m0s
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding
 metadata:
-  name: insights-operator-proxy
+  name: insights-on-prem-spoke-policy
   namespace: insights-on-prem-poc
 placementRef:
   name: all-managed-clusters
   apiGroup: cluster.open-cluster-management.io
   kind: Placement
 subjects:
-  - name: insights-operator-proxy
+  - name: insights-on-prem-spoke-policy
     apiGroup: policy.open-cluster-management.io
     kind: Policy

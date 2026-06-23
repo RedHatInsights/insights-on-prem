@@ -1,0 +1,135 @@
+# Hub-side Skupper Policy: create Site, Connector, AccessGrant on the hub,
+# then extract token values into Secret + ConfigMap for spoke distribution.
+# Targets only local-cluster (the hub).
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: insights-skupper-hub
+  namespace: insights-on-prem-poc
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    # --- Skupper Site on hub (accepts links from spokes) ---
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: insights-skupper-hub-site
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: skupper.io/v2alpha1
+                kind: Site
+                metadata:
+                  name: insights-on-prem
+                  namespace: insights-on-prem-poc
+                spec:
+                  linkAccess: default
+
+    # --- Connector: binds insights-on-prem app to Skupper network ---
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: insights-skupper-hub-connector
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: skupper.io/v2alpha1
+                kind: Connector
+                metadata:
+                  name: insights-on-prem
+                  namespace: insights-on-prem-poc
+                spec:
+                  routingKey: insights-on-prem
+                  selector: app=insights-on-prem
+                  port: 8000
+
+    # --- AccessGrant: allows spokes to link to this site ---
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: insights-skupper-hub-grant
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: skupper.io/v2alpha1
+                kind: AccessGrant
+                metadata:
+                  name: insights-on-prem-spokes
+                  namespace: insights-on-prem-poc
+                spec:
+                  redemptionsAllowed: 2000
+                  expirationWindow: 8760h
+
+    # --- Extract token values from AccessGrant status ---
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: insights-skupper-token-sync
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates-raw: |
+            {{- $grant := (lookup "skupper.io/v2alpha1" "AccessGrant" "insights-on-prem-poc" "insights-on-prem-spokes") }}
+            {{- if and $grant.status $grant.status.url }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Secret
+                metadata:
+                  name: insights-on-prem-skupper-code
+                  namespace: insights-on-prem-poc
+                type: Opaque
+                stringData:
+                  code: {{ $grant.status.code }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: ConfigMap
+                metadata:
+                  name: insights-on-prem-skupper-token
+                  namespace: insights-on-prem-poc
+                data:
+                  url: {{ $grant.status.url }}
+                  ca: |
+                    {{ $grant.status.ca | autoindent }}
+            {{- end }}
+---
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: insights-on-prem-hub-only
+  namespace: insights-on-prem-poc
+spec:
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            name: local-cluster
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: insights-skupper-hub
+  namespace: insights-on-prem-poc
+placementRef:
+  name: insights-on-prem-hub-only
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+subjects:
+  - name: insights-skupper-hub
+    apiGroup: policy.open-cluster-management.io
+    kind: Policy
