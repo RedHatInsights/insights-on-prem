@@ -23,21 +23,16 @@ echo "6. Creating Route for spoke access..."
 oc apply -f deploy/route.yml --namespace insights-on-prem-poc
 oc wait --for=jsonpath='{.spec.host}' route/insights-on-prem -n insights-on-prem-poc --timeout=30s
 
-echo "7. Setting up cert-manager and certificates..."
+echo "7. Creating Placement for managed clusters..."
+oc apply -f deploy/placement.yml
+
+echo "8. Setting up cert-manager and certificates..."
 # Install cert-manager operator and hub-side Policy for certificate management.
 # The Policy creates CAs, issuers, and server cert once cert-manager is ready.
 oc apply -f deploy/cert-manager.yml
 
-echo "    Waiting for server certificate..."
-until oc get secret insights-on-prem-server-tls -n insights-on-prem-poc &>/dev/null; do
-  sleep 10
-done
-
-echo "8. Deploying application..."
+echo "9. Deploying application..."
 oc apply -f deploy/insights.yml --namespace insights-on-prem-poc
-
-echo "9. Creating Placement for managed clusters..."
-oc apply -f deploy/placement.yml
 
 echo "9. Deploying OCM addon template..."
 oc apply -f deploy/addon-template.yml

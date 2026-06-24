@@ -144,6 +144,11 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
+    if _cert_reload_error:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "degraded", "reason": _cert_reload_error},
+        )
     return {"status": "healthy"}
 
 
@@ -429,9 +434,21 @@ TLS_DIR = "/tls"
 TLS_CERT = os.path.join(TLS_DIR, "tls.crt")
 TLS_KEY = os.path.join(TLS_DIR, "tls.key")
 CLIENT_CA_PATH = "/tls/client-ca/ca.crt"
-
-
 CLIENT_CA_DIR = "/tls/client-ca"
+
+_cert_reload_error: str | None = None
+
+
+def _cert_fingerprint(path: str) -> str | None:
+    """Return SHA-256 fingerprint of a PEM certificate on disk."""
+    try:
+        from cryptography import x509
+
+        with open(path, "rb") as f:
+            cert = x509.load_pem_x509_certificate(f.read())
+        return cert.fingerprint(cert.signature_hash_algorithm).hex()
+    except Exception:
+        return None
 
 
 async def _watch_certs(ssl_context: ssl.SSLContext):
@@ -441,13 +458,16 @@ async def _watch_certs(ssl_context: ssl.SSLContext):
     Watching the directories catches the symlink swap that inotify on
     individual files would miss.
     """
+    global _cert_reload_error
     async for _ in awatch(TLS_DIR, CLIENT_CA_DIR):
         try:
             ssl_context.load_cert_chain(TLS_CERT, TLS_KEY)
             ssl_context.load_verify_locations(cafile=CLIENT_CA_PATH)
+            _cert_reload_error = None
             logger.info("Reloaded SSLContext with updated certificates")
         except Exception:
-            logger.exception("Failed to reload certificates")
+            _cert_reload_error = "Failed to reload certificates — serving stale certs"
+            logger.exception(_cert_reload_error)
 
 
 def start_server():
