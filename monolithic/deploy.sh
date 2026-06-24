@@ -24,25 +24,13 @@ oc apply -f deploy/route.yml --namespace insights-on-prem-poc
 oc wait --for=jsonpath='{.spec.host}' route/insights-on-prem -n insights-on-prem-poc --timeout=30s
 
 echo "7. Setting up cert-manager and certificates..."
-# Install cert-manager operator (namespace + operatorgroup + subscription)
-oc apply -f deploy/cert-manager.yml 2>/dev/null || true
-echo "    Waiting for cert-manager to be ready..."
-until oc get crd certificates.cert-manager.io &>/dev/null; do
-  sleep 10
-done
-until oc get endpoints cert-manager-webhook -n cert-manager -o jsonpath='{.subsets[0].addresses[0].ip}' &>/dev/null; do
-  sleep 5
-done
+# Install cert-manager operator and hub-side Policy for certificate management.
+# The Policy creates CAs, issuers, and server cert once cert-manager is ready.
+oc apply -f deploy/cert-manager.yml
 
-# Template the Route hostname into the server certificate and apply all CRDs
-ROUTE_HOST=$(oc get route insights-on-prem -n insights-on-prem-poc -o jsonpath='{.spec.host}')
-echo "    Route hostname: $ROUTE_HOST"
-sed "s/ROUTE_HOSTNAME/$ROUTE_HOST/" deploy/cert-manager.yml | oc apply -f -
-
-# Wait for the server cert to be issued
 echo "    Waiting for server certificate..."
 until oc get secret insights-on-prem-server-tls -n insights-on-prem-poc &>/dev/null; do
-  sleep 5
+  sleep 10
 done
 
 echo "8. Deploying application..."

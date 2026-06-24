@@ -1,3 +1,4 @@
+# cert-manager operator installation
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -23,98 +24,144 @@ spec:
   source: redhat-operators
   sourceNamespace: openshift-marketplace
 ---
-# Bootstrap: self-signed issuer to create the CA certs
-apiVersion: cert-manager.io/v1
-kind: ClusterIssuer
-metadata:
-  name: selfsigned-bootstrap
-spec:
-  selfSigned: {}
----
-# Server CA — signs the hub's server certificate
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: insights-on-prem-server-ca
-  namespace: insights-on-prem-poc
-spec:
-  isCA: true
-  secretName: insights-on-prem-server-ca
-  commonName: insights-on-prem-server-ca
-  duration: 87600h # 10 years
-  renewBefore: 8760h # 1 year
-  privateKey:
-    algorithm: RSA
-    size: 4096
-  issuerRef:
-    name: selfsigned-bootstrap
-    kind: ClusterIssuer
----
-# Client CA — signs spoke client certs (via OCM CustomSigner)
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: insights-on-prem-client-ca
-  namespace: insights-on-prem-poc
-spec:
-  isCA: true
-  secretName: insights-on-prem-client-ca
-  commonName: insights-on-prem-client-ca
-  duration: 87600h
-  renewBefore: 8760h
-  privateKey:
-    algorithm: RSA
-    size: 4096
-  issuerRef:
-    name: selfsigned-bootstrap
-    kind: ClusterIssuer
----
-# Issuer that uses the server CA to sign leaf certs
-apiVersion: cert-manager.io/v1
-kind: Issuer
-metadata:
-  name: insights-on-prem-server-issuer
-  namespace: insights-on-prem-poc
-spec:
-  ca:
-    secretName: insights-on-prem-server-ca
----
-# Server leaf certificate — SANs are templated by deploy.sh
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: insights-on-prem-server-cert
-  namespace: insights-on-prem-poc
-spec:
-  secretName: insights-on-prem-server-tls
-  duration: 8760h # 1 year
-  renewBefore: 720h # 30 days
-  commonName: insights-on-prem.insights-on-prem-poc.svc
-  dnsNames:
-    - insights-on-prem.insights-on-prem-poc.svc
-    - insights-on-prem.insights-on-prem-poc.svc.cluster.local
-    - ROUTE_HOSTNAME
-  privateKey:
-    algorithm: RSA
-    size: 2048
-  usages:
-    - server auth
-  issuerRef:
-    name: insights-on-prem-server-issuer
-    kind: Issuer
----
-# Hub-side Policy: keep the server CA ConfigMap in sync with the CA Secret.
-# The spoke policy reads the CA from this ConfigMap via fromConfigMap.
-# Runs on the hub (local-cluster) where lookup can access the Secret directly.
+# Hub-side Policy: create all cert-manager resources (CAs, issuers, server cert)
+# and sync server CA to ConfigMap for spoke distribution.
+# Runs on the hub (local-cluster). If cert-manager CRDs don't exist yet,
+# the Policy stays NonCompliant and retries automatically.
 apiVersion: policy.open-cluster-management.io/v1
 kind: Policy
 metadata:
-  name: insights-on-prem-ca-sync
+  name: insights-on-prem-hub-certs
   namespace: insights-on-prem-poc
 spec:
   remediationAction: enforce
   disabled: false
   policy-templates:
+    # --- Bootstrap self-signed issuer ---
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: insights-on-prem-bootstrap-issuer
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: cert-manager.io/v1
+                kind: ClusterIssuer
+                metadata:
+                  name: selfsigned-bootstrap
+                spec:
+                  selfSigned: {}
+
+    # --- Server and client CA certificates ---
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: insights-on-prem-ca-certs
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: cert-manager.io/v1
+                kind: Certificate
+                metadata:
+                  name: insights-on-prem-server-ca
+                  namespace: insights-on-prem-poc
+                spec:
+                  isCA: true
+                  secretName: insights-on-prem-server-ca
+                  commonName: insights-on-prem-server-ca
+                  duration: 87600h
+                  renewBefore: 8760h
+                  privateKey:
+                    algorithm: RSA
+                    size: 4096
+                  issuerRef:
+                    name: selfsigned-bootstrap
+                    kind: ClusterIssuer
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: cert-manager.io/v1
+                kind: Certificate
+                metadata:
+                  name: insights-on-prem-client-ca
+                  namespace: insights-on-prem-poc
+                spec:
+                  isCA: true
+                  secretName: insights-on-prem-client-ca
+                  commonName: insights-on-prem-client-ca
+                  duration: 87600h
+                  renewBefore: 8760h
+                  privateKey:
+                    algorithm: RSA
+                    size: 4096
+                  issuerRef:
+                    name: selfsigned-bootstrap
+                    kind: ClusterIssuer
+
+    # --- Issuer that uses the server CA to sign leaf certs ---
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: insights-on-prem-server-issuer
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: cert-manager.io/v1
+                kind: Issuer
+                metadata:
+                  name: insights-on-prem-server-issuer
+                  namespace: insights-on-prem-poc
+                spec:
+                  ca:
+                    secretName: insights-on-prem-server-ca
+
+    # --- Server leaf certificate with dynamic Route hostname SAN ---
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: insights-on-prem-server-cert
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates-raw: |
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: cert-manager.io/v1
+                kind: Certificate
+                metadata:
+                  name: insights-on-prem-server-cert
+                  namespace: insights-on-prem-poc
+                spec:
+                  secretName: insights-on-prem-server-tls
+                  duration: 8760h
+                  renewBefore: 720h
+                  commonName: insights-on-prem.insights-on-prem-poc.svc
+                  dnsNames:
+                    - insights-on-prem.insights-on-prem-poc.svc
+                    - insights-on-prem.insights-on-prem-poc.svc.cluster.local
+                    - {{ (lookup "route.openshift.io/v1" "Route" "insights-on-prem-poc" "insights-on-prem").spec.host }}
+                  privateKey:
+                    algorithm: RSA
+                    size: 2048
+                  usages:
+                    - server auth
+                  issuerRef:
+                    name: insights-on-prem-server-issuer
+                    kind: Issuer
+
+    # --- Sync server CA to ConfigMap for spoke distribution ---
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
@@ -124,6 +171,8 @@ spec:
           remediationAction: enforce
           severity: medium
           object-templates-raw: |
+            {{- $ca := (lookup "v1" "Secret" "insights-on-prem-poc" "insights-on-prem-server-ca") }}
+            {{- if $ca.data }}
             - complianceType: musthave
               objectDefinition:
                 apiVersion: v1
@@ -133,7 +182,8 @@ spec:
                   namespace: insights-on-prem-poc
                 data:
                   ca-bundle.crt: |
-                    {{ index (lookup "v1" "Secret" "insights-on-prem-poc" "insights-on-prem-server-ca").data "tls.crt" | base64dec | autoindent }}
+                    {{ index $ca.data "tls.crt" | base64dec | autoindent }}
+            {{- end }}
 ---
 apiVersion: cluster.open-cluster-management.io/v1beta1
 kind: Placement
@@ -150,13 +200,13 @@ spec:
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding
 metadata:
-  name: insights-on-prem-ca-sync
+  name: insights-on-prem-hub-certs
   namespace: insights-on-prem-poc
 placementRef:
   name: insights-on-prem-hub-only
   apiGroup: cluster.open-cluster-management.io
   kind: Placement
 subjects:
-  - name: insights-on-prem-ca-sync
+  - name: insights-on-prem-hub-certs
     apiGroup: policy.open-cluster-management.io
     kind: Policy
