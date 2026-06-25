@@ -55,8 +55,6 @@ TLS_KEY = os.path.join(TLS_DIR, "tls.key")
 CLIENT_CA_DIR = os.path.join(TLS_DIR, "client-ca")
 CLIENT_CA_PATH = os.path.join(CLIENT_CA_DIR, "ca.crt")
 
-_cert_reload_error: str | None = None
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -92,8 +90,9 @@ async def lifespan(app: FastAPI):
 
     # Watch for certificate changes and hot-reload the SSLContext
     cert_watcher_task = None
+    app.state.cert_reload_error = None
     if hasattr(app.state, "ssl_context"):
-        cert_watcher_task = asyncio.create_task(_watch_certs(app.state.ssl_context))
+        cert_watcher_task = asyncio.create_task(_watch_certs(app))
 
     yield
 
@@ -150,12 +149,13 @@ async def root():
 
 
 @app.get("/health")
-async def health_check():
+async def health_check(request: Request):
     """Health check endpoint."""
-    if _cert_reload_error:
+    error = getattr(request.app.state, "cert_reload_error", None)
+    if error:
         return JSONResponse(
             status_code=503,
-            content={"status": "degraded", "reason": _cert_reload_error},
+            content={"status": "degraded", "reason": error},
         )
     return {"status": "healthy"}
 
@@ -450,23 +450,24 @@ def _cert_fingerprint(path: str) -> str | None:
         return None
 
 
-async def _watch_certs(ssl_context: ssl.SSLContext):
+async def _watch_certs(application: FastAPI):
     """Watch TLS cert directories and reload SSLContext when they change.
 
     Kubernetes Secret volumes use symlinks (..data → timestamped dir).
     Watching the directories catches the symlink swap that inotify on
     individual files would miss.
     """
-    global _cert_reload_error
     async for _ in awatch(TLS_DIR, CLIENT_CA_DIR):
         try:
-            ssl_context.load_cert_chain(TLS_CERT, TLS_KEY)
-            ssl_context.load_verify_locations(cafile=CLIENT_CA_PATH)
-            _cert_reload_error = None
+            application.state.ssl_context.load_cert_chain(TLS_CERT, TLS_KEY)
+            application.state.ssl_context.load_verify_locations(cafile=CLIENT_CA_PATH)
+            application.state.cert_reload_error = None
             logger.info("Reloaded SSLContext with updated certificates")
         except Exception:
-            _cert_reload_error = "Failed to reload certificates — serving stale certs"
-            logger.exception(_cert_reload_error)
+            application.state.cert_reload_error = (
+                "Failed to reload certificates — serving stale certs"
+            )
+            logger.exception(application.state.cert_reload_error)
 
 
 def start_server():
