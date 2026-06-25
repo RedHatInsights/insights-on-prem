@@ -1,0 +1,365 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: insights-on-prem-smoke-test-pipeline
+spec:
+  description: |
+    Smoke test pipeline for insights-on-prem. Provisions an ephemeral OCP
+    cluster, installs ACM, deploys the service image from SNAPSHOT, and runs
+    integration tests.
+  params:
+    - name: SNAPSHOT
+      description: The JSON string of the Snapshot under test
+      type: string
+    - name: test-name
+      description: The name of the test
+      default: insights-on-prem-smoke-test
+    - name: ocp-version
+      description: OCP version for the ephemeral cluster
+      default: "4.21"
+    - name: namespace
+      description: Namespace to deploy insights-on-prem into
+      default: insights-on-prem
+  tasks:
+    - name: provision-cluster
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/openshift/konflux-tasks
+          - name: revision
+            value: main
+          - name: pathInRepo
+            value: tasks/provision-ephemeral-cluster/0.1/provision-ephemeral-cluster.yaml
+      params:
+        - name: ownerName
+          value: $(context.pipelineRun.name)
+        - name: ownerUid
+          value: $(context.pipelineRun.uid)
+        - name: workflow
+          value: generic-claim
+        - name: clusterClaim
+          value: |
+            {
+              "architecture": "amd64",
+              "cloud": "aws",
+              "owner": "obs",
+              "product": "ocp",
+              "timeout": "3h0m0s",
+              "version": "$(params.ocp-version)"
+            }
+        - name: timeout
+          value: "3h"
+
+    - name: install-acm
+      runAfter:
+        - provision-cluster
+      taskSpec:
+        params:
+          - name: kubeconfigSecretRef
+            type: string
+            description: Name of the Secret containing the kubeconfig for the target cluster
+        steps:
+          - name: install-acm
+            image: registry.redhat.io/openshift4/ose-cli:latest
+            env:
+              - name: KUBECONFIG
+                value: /var/run/secrets/cluster/kubeconfig
+            volumeMounts:
+              - name: cluster-credentials
+                mountPath: /var/run/secrets/cluster
+                readOnly: true
+            script: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+
+              echo "--- Waiting for cluster API to be reachable ---"
+              for i in $(seq 1 30); do
+                if oc cluster-info &>/dev/null; then
+                  echo "Cluster API is reachable"
+                  break
+                fi
+                echo "  Attempt $i: cluster API not reachable yet..."
+                sleep 10
+              done
+              oc cluster-info
+              oc get nodes
+
+              ACM_NS="ocm"
+              oc create namespace "$ACM_NS"
+
+              oc apply -f - <<EOF
+              apiVersion: operators.coreos.com/v1
+              kind: OperatorGroup
+              metadata:
+                name: acm-operator-group
+                namespace: $ACM_NS
+              spec:
+                targetNamespaces:
+                  - $ACM_NS
+              EOF
+
+              echo "Waiting for ACM packagemanifest..."
+              CHANNEL=""
+              for i in $(seq 1 30); do
+                CHANNEL=$(oc get packagemanifest advanced-cluster-management \
+                  -o jsonpath='{.status.defaultChannel}' 2>/dev/null || echo "")
+                if [[ -n "$CHANNEL" ]]; then
+                  break
+                fi
+                echo "  Attempt $i: packagemanifest not ready yet..."
+                sleep 10
+              done
+
+              if [[ -z "$CHANNEL" ]]; then
+                echo "ERROR: Could not find ACM packagemanifest"
+                oc get packagemanifest | grep -i cluster-management || true
+                exit 1
+              fi
+              echo "Using ACM channel: $CHANNEL"
+
+              oc apply -f - <<EOF
+              apiVersion: operators.coreos.com/v1alpha1
+              kind: Subscription
+              metadata:
+                name: acm-operator-subscription
+                namespace: $ACM_NS
+              spec:
+                sourceNamespace: openshift-marketplace
+                source: redhat-operators
+                channel: $CHANNEL
+                installPlanApproval: Automatic
+                name: advanced-cluster-management
+              EOF
+
+              echo "Waiting for ACM operator CSV to succeed..."
+              PHASE=""
+              for i in $(seq 1 60); do
+                CSV=$(oc get subscription acm-operator-subscription -n "$ACM_NS" \
+                  -o jsonpath='{.status.installedCSV}' 2>/dev/null || echo "")
+                if [[ -n "$CSV" ]]; then
+                  PHASE=$(oc get csv "$CSV" -n "$ACM_NS" \
+                    -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+                  if [[ "$PHASE" == "Succeeded" ]]; then
+                    echo "ACM operator CSV $CSV is ready"
+                    break
+                  fi
+                  echo "  Attempt $i: CSV $CSV phase=$PHASE"
+                else
+                  echo "  Attempt $i: no CSV yet..."
+                fi
+                sleep 15
+              done
+
+              if [[ "$PHASE" != "Succeeded" ]]; then
+                echo "ERROR: ACM operator CSV did not reach Succeeded state"
+                oc get csv -n "$ACM_NS"
+                exit 1
+              fi
+
+              oc get secret pull-secret -n openshift-config \
+                -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d > /tmp/ps.json
+              oc create secret generic multiclusterhub-operator-pull-secret \
+                -n "$ACM_NS" \
+                --from-file=.dockerconfigjson=/tmp/ps.json \
+                --type=kubernetes.io/dockerconfigjson
+              rm -f /tmp/ps.json
+
+              echo "Waiting for MultiClusterHub CRD to be available..."
+              for i in $(seq 1 30); do
+                if oc get crd multiclusterhubs.operator.open-cluster-management.io &>/dev/null; then
+                  echo "MultiClusterHub CRD is ready"
+                  break
+                fi
+                echo "  Attempt $i: CRD not registered yet..."
+                sleep 10
+              done
+
+              oc apply -f - <<EOF
+              apiVersion: operator.open-cluster-management.io/v1
+              kind: MultiClusterHub
+              metadata:
+                name: multiclusterhub
+                namespace: $ACM_NS
+              spec:
+                availabilityConfig: Basic
+                imagePullSecret: multiclusterhub-operator-pull-secret
+                overrides:
+                  components:
+                    - name: search
+                      enabled: false
+                    - name: cluster-backup
+                      enabled: false
+                    - name: console
+                      enabled: false
+              EOF
+
+              echo "Waiting for MultiClusterHub to reach Running state (this may take 15-25 minutes)..."
+              oc wait --for=jsonpath='{.status.phase}'=Running \
+                mch/multiclusterhub -n "$ACM_NS" --timeout=30m
+
+              ACM_VERSION=$(oc get mch multiclusterhub -n "$ACM_NS" \
+                -o jsonpath='{.status.currentVersion}')
+              echo "ACM $ACM_VERSION is Running"
+
+              echo "Waiting for local-cluster ManagedCluster..."
+              oc wait --for=condition=ManagedClusterConditionAvailable \
+                managedcluster/local-cluster --timeout=10m
+              echo "local-cluster is available"
+        volumes:
+          - name: cluster-credentials
+            secret:
+              secretName: $(params.kubeconfigSecretRef)
+      params:
+        - name: kubeconfigSecretRef
+          value: $(tasks.provision-cluster.results.secretRef)
+
+    - name: deploy-service
+      runAfter:
+        - install-acm
+      taskSpec:
+        params:
+          - name: kubeconfigSecretRef
+            type: string
+            description: Name of the Secret containing the kubeconfig for the target cluster
+          - name: SNAPSHOT
+            type: string
+            description: The JSON string of the Snapshot under test
+          - name: namespace
+            type: string
+            description: Namespace to deploy the service into
+        steps:
+          - name: deploy-service
+            image: registry.redhat.io/openshift4/ose-cli:latest
+            env:
+              - name: KUBECONFIG
+                value: /var/run/secrets/cluster/kubeconfig
+              - name: SNAPSHOT
+                value: $(params.SNAPSHOT)
+              - name: NAMESPACE
+                value: $(params.namespace)
+            volumeMounts:
+              - name: cluster-credentials
+                mountPath: /var/run/secrets/cluster
+                readOnly: true
+            script: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+
+              SERVICE_IMAGE=$(python3 -c "import json,sys; comps=json.loads(sys.stdin.read())['components']; print(next(c['containerImage'] for c in comps if c['name']=='insights-on-prem'))" <<<"$SNAPSHOT")
+              echo "Deploying service image: $SERVICE_IMAGE"
+
+              oc create namespace "$NAMESPACE"
+
+              oc apply -f - <<EOF
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: insights-on-prem
+                namespace: $NAMESPACE
+                labels:
+                  app: insights-on-prem
+              spec:
+                replicas: 1
+                selector:
+                  matchLabels:
+                    app: insights-on-prem
+                template:
+                  metadata:
+                    labels:
+                      app: insights-on-prem
+                  spec:
+                    containers:
+                      - name: insights-on-prem
+                        image: $SERVICE_IMAGE
+                        ports:
+                          - containerPort: 8080
+              EOF
+
+              echo "Waiting for deployment rollout..."
+              oc rollout status deployment/insights-on-prem -n "$NAMESPACE" --timeout=300s
+              echo "Service deployed successfully"
+        volumes:
+          - name: cluster-credentials
+            secret:
+              secretName: $(params.kubeconfigSecretRef)
+      params:
+        - name: kubeconfigSecretRef
+          value: $(tasks.provision-cluster.results.secretRef)
+        - name: SNAPSHOT
+          value: $(params.SNAPSHOT)
+        - name: namespace
+          value: $(params.namespace)
+
+    - name: run-smoke-test
+      runAfter:
+        - deploy-service
+      taskSpec:
+        params:
+          - name: kubeconfigSecretRef
+            type: string
+            description: Name of the Secret containing the kubeconfig for the target cluster
+          - name: SNAPSHOT
+            type: string
+            description: The JSON string of the Snapshot under test
+          - name: namespace
+            type: string
+            description: Namespace where the service is deployed
+        steps:
+          - name: run-smoke-test
+            image: quay.io/ccxdev/insights-on-prem-tests:latest
+            env:
+              - name: KUBECONFIG
+                value: /var/run/secrets/cluster/kubeconfig
+              - name: SNAPSHOT
+                value: $(params.SNAPSHOT)
+              - name: NAMESPACE
+                value: $(params.namespace)
+            volumeMounts:
+              - name: cluster-credentials
+                mountPath: /var/run/secrets/cluster
+                readOnly: true
+            script: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+
+              COMMIT_SHA=$(python3 -c "import json,sys; comps=json.loads(sys.stdin.read())['components']; print(next(c['source']['git']['revision'] for c in comps if c['name']=='insights-on-prem'))" <<<"$SNAPSHOT")
+              echo "Running smoke tests from commit: $COMMIT_SHA"
+
+              git init /tmp/repo
+              cd /tmp/repo
+              git remote add origin https://github.com/RedHatInsights/insights-on-prem.git
+              git fetch --depth=1 origin "$COMMIT_SHA"
+              git checkout FETCH_HEAD
+
+              export NAMESPACE
+              pytest tests/integration/test_smoke.py -v --junitxml=/tmp/smoke-test-results.xml
+        volumes:
+          - name: cluster-credentials
+            secret:
+              secretName: $(params.kubeconfigSecretRef)
+      params:
+        - name: kubeconfigSecretRef
+          value: $(tasks.provision-cluster.results.secretRef)
+        - name: SNAPSHOT
+          value: $(params.SNAPSHOT)
+        - name: namespace
+          value: $(params.namespace)
+
+  finally:
+    - name: deprovision-ephemeral-cluster
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/openshift/konflux-tasks
+          - name: revision
+            value: main
+          - name: pathInRepo
+            value: tasks/deprovision-ephemeral-cluster/0.1/deprovision-ephemeral-cluster.yaml
+      params:
+        - name: testPlatformClusterClaimName
+          value: $(tasks.provision-cluster.results.testPlatformClusterClaimName)
+        - name: testPlatformClusterClaimNamespace
+          value: $(tasks.provision-cluster.results.testPlatformClusterClaimNamespace)

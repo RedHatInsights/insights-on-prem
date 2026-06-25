@@ -41,6 +41,38 @@ The repository is managed directly in the `ccxdev` Quay org (not via Konflux Ima
 
 For Prow periodic jobs, the image will need to be made accessible separately. See `TODO.md` for options.
 
+## Integration Tests
+
+The `integration/` directory contains tests that run against a live OpenShift cluster with ACM installed. These tests are designed to be portable across multiple execution contexts:
+
+| Context | How it runs |
+|---------|-------------|
+| **Konflux integration pipeline** | Automatic on every PR via IntegrationTestScenario |
+| **Job inside the cluster** | Deploy as a Job with in-cluster ServiceAccount |
+| **Developer machine** | `KUBECONFIG=~/.kube/config NAMESPACE=insights-on-prem pytest tests/integration/` |
+
+Tests discover the cluster via the standard `KUBECONFIG` env var (or in-cluster config when running as a Job). Service-specific configuration is passed via env vars (`NAMESPACE`, `DEPLOYMENT_NAME`).
+
+### Running Locally
+
+```bash
+export KUBECONFIG=~/.kube/config
+export NAMESPACE=insights-on-prem
+pytest tests/integration/ -v
+```
+
+### CI Pipeline
+
+The smoke test pipeline (`ci/test-pipelines/insights-on-prem-smoke-test-pipeline.yaml`) runs on every PR:
+
+1. Claims a cluster from the `obs` pool (~5-10 min)
+2. Installs ACM with Basic availability (~15-25 min)
+3. Deploys the PR-built service image
+4. Runs `pytest tests/integration/test_smoke.py`
+5. Deprovisions the cluster
+
+The IntegrationTestScenario is currently set to **optional** (advisory, not blocking).
+
 ## Adding Dependencies
 
 - **Python packages:** Add to `requirements.txt`, the image will be rebuilt on next merge.

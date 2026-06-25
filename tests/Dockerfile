@@ -17,6 +17,7 @@ RUN microdnf install --nodocs -y \
         curl-minimal \
         tar \
         jq \
+        git \
     && python3.12 -m venv $VENV \
     && pip install --no-cache-dir -U pip setuptools wheel \
     && microdnf clean all

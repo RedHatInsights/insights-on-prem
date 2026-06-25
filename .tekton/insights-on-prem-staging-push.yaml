@@ -1,0 +1,54 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  annotations:
+    build.appstudio.openshift.io/repo: https://github.com/ikerreyes/insights-on-prem?rev={{revision}}
+    build.appstudio.redhat.com/commit_sha: '{{revision}}'
+    build.appstudio.redhat.com/target_branch: '{{target_branch}}'
+    pipelinesascode.tekton.dev/cancel-in-progress: "true"
+    pipelinesascode.tekton.dev/max-keep-runs: "3"
+    pipelinesascode.tekton.dev/on-cel-expression: event == "push" && target_branch
+      == "konflux-pr-test"
+    pipelinesascode.tekton.dev/pipeline: >-
+      https://github.com/RedHatInsights/konflux-pipelines/raw/main/pipelines/docker-build.yaml
+  creationTimestamp: null
+  labels:
+    appstudio.openshift.io/application: insights-on-prem
+    appstudio.openshift.io/component: insights-on-prem
+    pipelines.appstudio.openshift.io/type: build
+  name: insights-on-prem-staging-on-push
+  namespace: ireyes-tenant
+spec:
+  params:
+  - name: git-url
+    value: '{{source_url}}'
+  - name: revision
+    value: '{{revision}}'
+  - name: output-image
+    value: quay.io/redhat-user-workloads-stage/ireyes-tenant/insights-on-prem/insights-on-prem:{{revision}}
+  - name: image-expires-after
+    value: 5d
+  - name: dockerfile
+    value: Dockerfile
+  - name: path-context
+    value: monolithic
+  pipelineRef:
+    name: docker-build
+  taskRunTemplate:
+    serviceAccountName: build-pipeline-insights-on-prem
+  workspaces:
+  - name: workspace
+    volumeClaimTemplate:
+      metadata:
+        creationTimestamp: null
+      spec:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+      status: {}
+  - name: git-auth
+    secret:
+      secretName: '{{ git_auth_secret }}'
+status: {}
