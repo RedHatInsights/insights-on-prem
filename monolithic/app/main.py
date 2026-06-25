@@ -49,6 +49,14 @@ from app.services.upload_service import UploadService
 
 logger = logging.getLogger(__name__)
 
+TLS_DIR = "/tls"
+TLS_CERT = os.path.join(TLS_DIR, "tls.crt")
+TLS_KEY = os.path.join(TLS_DIR, "tls.key")
+CLIENT_CA_DIR = os.path.join(TLS_DIR, "client-ca")
+CLIENT_CA_PATH = os.path.join(CLIENT_CA_DIR, "ca.crt")
+
+_cert_reload_error: str | None = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -428,15 +436,6 @@ async def http_exception_handler(request, exc: HTTPException):
             request_id=request.headers.get("x-rh-insights-request-id"),
         ).dict(),
     )
-
-
-TLS_DIR = "/tls"
-TLS_CERT = os.path.join(TLS_DIR, "tls.crt")
-TLS_KEY = os.path.join(TLS_DIR, "tls.key")
-CLIENT_CA_PATH = "/tls/client-ca/ca.crt"
-CLIENT_CA_DIR = "/tls/client-ca"
-
-_cert_reload_error: str | None = None
 
 
 def _cert_fingerprint(path: str) -> str | None:
