@@ -31,6 +31,8 @@ echo "8. Setting up cert-manager and certificates..."
 # The Policy creates CAs, issuers, and server cert once cert-manager is ready.
 oc apply -f deploy/cert-manager.yml
 
+# The pod will stay in ContainerCreating until cert-manager issues the server
+# certificate and the Secret volumes become available. This is expected.
 echo "9. Deploying application..."
 oc apply -f deploy/insights.yml --namespace insights-on-prem-poc
 
