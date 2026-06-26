@@ -14,7 +14,6 @@ spec:
       containers:
       - name: insights-on-prem
         image: quay.io/ccxdev/insights-on-premise-poc:latest
-        command: ["python", "-m", "app.main"]
         ports:
         - containerPort: 8443
           name: https
@@ -59,7 +58,7 @@ spec:
           - key: tls.crt
             path: ca.crt
       imagePullSecrets:
-      - name: ccxdev-insights-on-prem-poc-pull-secret
+      - name: jipapous-insights-on-prem-pull-secret
   selector:
     matchLabels:
       app: insights-on-prem
