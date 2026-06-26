@@ -60,10 +60,13 @@ oc set env deployment/insights-client -n open-cluster-management \
   CCX_SERVER=https://insights-operator-proxy.openshift-insights.svc.cluster.local:8443/api/v2 \
   SSL_CERT_DIR=/service-ca \
   POLL_INTERVAL=1
-oc patch deployment insights-client -n open-cluster-management --type=json -p='[
-  {"op":"add","path":"/spec/template/spec/volumes/-","value":{"name":"service-ca","configMap":{"name":"insights-on-prem-service-ca"}}},
-  {"op":"add","path":"/spec/template/spec/containers/0/volumeMounts/-","value":{"name":"service-ca","mountPath":"/service-ca","readOnly":true}}
-]'
+oc set volume deployment/insights-client -n open-cluster-management \
+  --add --overwrite \
+  --name=service-ca \
+  --type=configmap \
+  --configmap-name=insights-on-prem-service-ca \
+  --mount-path=/service-ca \
+  --read-only=true
 
 echo "16. Waiting for insights-client to roll out..."
 oc rollout status deployment/insights-client -n open-cluster-management --timeout=120s
