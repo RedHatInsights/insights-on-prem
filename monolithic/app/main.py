@@ -468,6 +468,7 @@ def start_server():
         return
 
     ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
     ssl_context.load_cert_chain(TLS_CERT, TLS_KEY)
     ssl_context.load_verify_locations(cafile=CLIENT_CA_PATH)
     ssl_context.verify_mode = ssl.CERT_REQUIRED
