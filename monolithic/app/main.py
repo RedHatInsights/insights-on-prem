@@ -438,18 +438,6 @@ async def http_exception_handler(request, exc: HTTPException):
     )
 
 
-def _cert_fingerprint(path: str) -> str | None:
-    """Return SHA-256 fingerprint of a PEM certificate on disk."""
-    try:
-        from cryptography import x509
-
-        with open(path, "rb") as f:
-            cert = x509.load_pem_x509_certificate(f.read())
-        return cert.fingerprint(cert.signature_hash_algorithm).hex()
-    except Exception:
-        return None
-
-
 async def _watch_certs(application: FastAPI):
     """Watch TLS cert directories and reload SSLContext when they change.
 
