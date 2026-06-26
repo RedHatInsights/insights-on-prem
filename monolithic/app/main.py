@@ -475,15 +475,7 @@ def start_server():
 
     app.state.ssl_context = ssl_context
 
-    uvi_config = uvicorn.Config(
-        app,
-        host="0.0.0.0",
-        port=8443,
-        ssl_keyfile=TLS_KEY,
-        ssl_certfile=TLS_CERT,
-        ssl_ca_certs=CLIENT_CA_PATH,
-        ssl_cert_reqs=ssl.CERT_REQUIRED,
-    )
+    uvi_config = uvicorn.Config(app, host="0.0.0.0", port=8443)
     uvi_config.load()
     uvi_config.ssl = ssl_context
 
