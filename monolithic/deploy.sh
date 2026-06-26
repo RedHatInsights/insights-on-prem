@@ -36,7 +36,7 @@ oc apply -f deploy/cert-manager.yml
 echo "9. Deploying application..."
 oc apply -f deploy/insights.yml --namespace insights-on-prem-poc
 
-echo "9. Deploying OCM addon template..."
+echo "10. Deploying OCM addon template..."
 oc apply -f deploy/addon-template.yml
 
 echo "11. Deploying OCM addon deployment config..."
