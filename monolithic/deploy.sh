@@ -11,7 +11,7 @@ echo "2. Deploying PostgreSQL..."
 oc apply -f deploy/postgres.yml --namespace insights-on-prem-poc
 
 echo "3. Applying secrets..."
-oc apply -f deploy/ccxdev-insights-on-prem-poc-secret.yml --namespace insights-on-prem-poc
+oc apply -f deploy/ccxdev-insights-on-prem-poc-secret-jipapous.yml --namespace insights-on-prem-poc
 
 echo "4. Setting up ServiceAccount for Thanos access..."
 oc apply -f deploy/serviceaccount.yml
@@ -30,6 +30,8 @@ echo "8. Setting up cert-manager and certificates..."
 # Install cert-manager operator and hub-side Policy for certificate management.
 # The Policy creates CAs, issuers, and server cert once cert-manager is ready.
 oc apply -f deploy/cert-manager.yml
+echo "    Waiting for cert-manager..."
+oc wait deployment/cert-manager -n cert-manager --for=condition=Available --timeout=300s
 
 # The pod will stay in ContainerCreating until cert-manager issues the server
 # certificate and the Secret volumes become available. This is expected.
