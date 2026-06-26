@@ -53,11 +53,17 @@ echo "14. Pausing MultiClusterHub operator..."
 oc annotate multiclusterhub multiclusterhub -n open-cluster-management mch-pause=true --overwrite
 
 echo "15. Configuring ACM insights-client..."
-# Update the CCX_SERVER environment variable to point to on-premise service
-# Also, set insights-client poll interval to 1 minute for demo purposes
+# insights-client goes through the spoke proxy, same as on managed clusters.
+# The proxy uses a service-serving cert; SSL_CERT_DIR adds the service CA
+# on top of the system trust bundle so insights-client can verify it.
 oc set env deployment/insights-client -n open-cluster-management \
-  CCX_SERVER=https://insights-on-prem.insights-on-prem-poc.svc.cluster.local:8443/api/v2 \
+  CCX_SERVER=https://insights-operator-proxy.openshift-insights.svc.cluster.local:8443/api/v2 \
+  SSL_CERT_DIR=/service-ca \
   POLL_INTERVAL=1
+oc patch deployment insights-client -n open-cluster-management --type=json -p='[
+  {"op":"add","path":"/spec/template/spec/volumes/-","value":{"name":"service-ca","configMap":{"name":"insights-on-prem-service-ca"}}},
+  {"op":"add","path":"/spec/template/spec/containers/0/volumeMounts/-","value":{"name":"service-ca","mountPath":"/service-ca","readOnly":true}}
+]'
 
 echo "16. Waiting for insights-client to roll out..."
 oc rollout status deployment/insights-client -n open-cluster-management --timeout=120s
