@@ -445,7 +445,7 @@ async def _watch_certs(application: FastAPI):
     Watching the directories catches the symlink swap that inotify on
     individual files would miss.
     """
-    async for _ in awatch(TLS_DIR, CLIENT_CA_DIR):
+    async for _ in awatch(TLS_DIR):
         try:
             application.state.ssl_context.load_cert_chain(TLS_CERT, TLS_KEY)
             application.state.ssl_context.load_verify_locations(cafile=CLIENT_CA_PATH)
