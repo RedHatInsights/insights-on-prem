@@ -50,6 +50,9 @@ oc apply -f deploy/addon-registration.yml
 echo "13. Deploying spoke policy (proxy manifests via hub templates)..."
 oc apply -f deploy/spoke-policy.yml
 
+echo "    Waiting for service CA bundle..."
+oc wait configmap/insights-on-prem-service-ca -n open-cluster-management --for=jsonpath='{.data.service-ca\.crt}' --timeout=300s
+
 echo "14. Pausing MultiClusterHub operator..."
 # Pause the operator to prevent it from reverting our changes in insights-client deployment
 oc annotate multiclusterhub multiclusterhub -n open-cluster-management mch-pause=true --overwrite
