@@ -11,7 +11,7 @@ echo "2. Deploying PostgreSQL..."
 oc apply -f deploy/postgres.yml --namespace insights-on-prem-poc
 
 echo "3. Applying secrets..."
-oc apply -f deploy/ccxdev-insights-on-prem-poc-secret-jipapous.yml --namespace insights-on-prem-poc
+oc apply -f deploy/ccxdev-insights-on-prem-poc-secret.yml --namespace insights-on-prem-poc
 
 echo "4. Setting up ServiceAccount for Thanos access..."
 oc apply -f deploy/serviceaccount.yml
