@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import ssl
+import threading
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -22,7 +23,6 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
-from watchfiles import awatch
 
 from app.config_loader import load_config, load_insights_components
 from app.content_parser_yaml import YAMLContentParser
@@ -52,8 +52,39 @@ logger = logging.getLogger(__name__)
 TLS_DIR = "/tls"
 TLS_CERT = os.path.join(TLS_DIR, "tls.crt")
 TLS_KEY = os.path.join(TLS_DIR, "tls.key")
-CLIENT_CA_DIR = os.path.join(TLS_DIR, "client-ca")
-CLIENT_CA_PATH = os.path.join(CLIENT_CA_DIR, "ca.crt")
+CLIENT_CA_PATH = os.path.join(TLS_DIR, "client-ca", "ca.crt")
+
+
+class _BackgroundTaskTracker:
+    """Thread-safe tracker for in-flight background tasks."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._count = 0
+        self._idle = threading.Event()
+        self._idle.set()
+
+    def start(self):
+        with self._lock:
+            self._count += 1
+            self._idle.clear()
+
+    def finish(self):
+        with self._lock:
+            self._count -= 1
+            if self._count == 0:
+                self._idle.set()
+
+    def wait_until_idle(self, timeout: float | None = None) -> bool:
+        return self._idle.wait(timeout=timeout)
+
+    @property
+    def active_count(self) -> int:
+        with self._lock:
+            return self._count
+
+
+_task_tracker = _BackgroundTaskTracker()
 
 
 @asynccontextmanager
@@ -75,7 +106,8 @@ async def lifespan(app: FastAPI):
 
     app.state.processor_service = ProcessorService(config)
     app.state.upload_service = UploadService(
-        app.state.processor_service, config, session_factory
+        app.state.processor_service, config, session_factory,
+        task_tracker=_task_tracker,
     )
     app.state.content_service = ContentService(YAMLContentParser())
     app.state.report_service = ReportService(app.state.content_service)
@@ -88,20 +120,21 @@ async def lifespan(app: FastAPI):
         _cleanup_old_request_reports(session_factory, config)
     )
 
-    # Watch for certificate changes and hot-reload the SSLContext
-    cert_watcher_task = None
-    app.state.cert_reload_error = None
-    if hasattr(app.state, "ssl_context"):
-        cert_watcher_task = asyncio.create_task(_watch_certs(app))
-
     yield
 
-    for task in (cleanup_task, cert_watcher_task):
-        if task is None:
-            continue
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
+    logger.info("Shutting down: waiting for in-flight background tasks...")
+    drained = await asyncio.to_thread(_task_tracker.wait_until_idle, 270)
+    if drained:
+        logger.info("All background tasks finished")
+    else:
+        logger.warning(
+            "Shutdown timeout: %d background tasks still running",
+            _task_tracker.active_count,
+        )
+
+    cleanup_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await cleanup_task
 
 
 async def _cleanup_old_request_reports(session_factory, config):
@@ -149,14 +182,8 @@ async def root():
 
 
 @app.get("/health")
-async def health_check(request: Request):
+async def health_check():
     """Health check endpoint."""
-    error = getattr(request.app.state, "cert_reload_error", None)
-    if error:
-        return JSONResponse(
-            status_code=503,
-            content={"status": "degraded", "reason": error},
-        )
     return {"status": "healthy"}
 
 
@@ -436,26 +463,6 @@ async def http_exception_handler(request, exc: HTTPException):
             request_id=request.headers.get("x-rh-insights-request-id"),
         ).dict(),
     )
-
-
-async def _watch_certs(application: FastAPI):
-    """Watch TLS cert directories and reload SSLContext when they change.
-
-    Kubernetes Secret volumes use symlinks (..data → timestamped dir).
-    Watching the directories catches the symlink swap that inotify on
-    individual files would miss.
-    """
-    async for _ in awatch(TLS_DIR):
-        try:
-            application.state.ssl_context.load_cert_chain(TLS_CERT, TLS_KEY)
-            application.state.ssl_context.load_verify_locations(cafile=CLIENT_CA_PATH)
-            application.state.cert_reload_error = None
-            logger.info("Reloaded SSLContext with updated certificates")
-        except Exception:
-            application.state.cert_reload_error = (
-                "Failed to reload certificates — serving stale certs"
-            )
-            logger.exception(application.state.cert_reload_error)
 
 
 def start_server():

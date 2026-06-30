@@ -25,17 +25,12 @@ class UploadService:
         processor_service: ProcessorService,
         config: AppConfig,
         session_factory: sessionmaker,
+        task_tracker=None,
     ):
-        """
-        Initialize the upload service.
-
-        :param processor_service: Processor service instance
-        :param config: Application configuration
-        :param session_factory: SQLAlchemy session factory for background tasks
-        """
         self.processor_service = processor_service
         self.config = config
         self.session_factory = session_factory
+        self.task_tracker = task_tracker
 
     def _get_archive_suffix(self, file: UploadFile) -> str:
         suffix = ""
@@ -115,12 +110,8 @@ class UploadService:
         return temp_file_path, total_size
 
     def _process_in_background(self, temp_file_path: str, request_id: str) -> None:
-        """
-        Process archive in a background task.
-
-        :param temp_file_path: Path to temporary archive file
-        :param request_id: Request ID for logging
-        """
+        if self.task_tracker:
+            self.task_tracker.start()
         try:
             db = self.session_factory()
             try:
@@ -145,6 +136,8 @@ class UploadService:
                     logger.debug(f"Cleaned up temporary file: {temp_file_path}")
                 except Exception as e:
                     logger.warning(f"Failed to clean up temporary file: {e}")
+            if self.task_tracker:
+                self.task_tracker.finish()
 
     async def process_upload(
         self, background_tasks: BackgroundTasks, file: UploadFile, request_id: str
