@@ -106,7 +106,9 @@ async def lifespan(app: FastAPI):
 
     app.state.processor_service = ProcessorService(config)
     app.state.upload_service = UploadService(
-        app.state.processor_service, config, session_factory,
+        app.state.processor_service,
+        config,
+        session_factory,
         task_tracker=_task_tracker,
     )
     app.state.content_service = ContentService(YAMLContentParser())
