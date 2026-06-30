@@ -189,7 +189,7 @@ spec:
                   template:
                     metadata:
                       annotations:
-                        cert-hash: '{{ index $secret.data "tls.crt" | base64dec | autoindent | sha256sum }}'
+                        cert-hash: '{{ index $secret.data "tls.crt" | base64dec | sha256sum }}'
             {{- end }}
 
     # --- Sync server CA to ConfigMap for spoke distribution ---
