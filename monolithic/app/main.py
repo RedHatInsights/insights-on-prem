@@ -6,7 +6,6 @@ import json
 import logging
 import os
 import ssl
-import threading
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -46,6 +45,7 @@ from app.services.report_service import ReportService
 from app.services.thanos_service import ThanosService
 from app.services.upgrade_prediction_service import UpgradePredictionService
 from app.services.upload_service import UploadService
+from app.utils.task_tracker import BackgroundTaskTracker
 
 logger = logging.getLogger(__name__)
 
@@ -55,36 +55,7 @@ TLS_KEY = os.path.join(TLS_DIR, "tls.key")
 CLIENT_CA_PATH = os.path.join(TLS_DIR, "client-ca", "ca.crt")
 
 
-class _BackgroundTaskTracker:
-    """Thread-safe tracker for in-flight background tasks."""
-
-    def __init__(self):
-        self._lock = threading.Lock()
-        self._count = 0
-        self._idle = threading.Event()
-        self._idle.set()
-
-    def start(self):
-        with self._lock:
-            self._count += 1
-            self._idle.clear()
-
-    def finish(self):
-        with self._lock:
-            self._count -= 1
-            if self._count == 0:
-                self._idle.set()
-
-    def wait_until_idle(self, timeout: float | None = None) -> bool:
-        return self._idle.wait(timeout=timeout)
-
-    @property
-    def active_count(self) -> int:
-        with self._lock:
-            return self._count
-
-
-_task_tracker = _BackgroundTaskTracker()
+_task_tracker = BackgroundTaskTracker()
 
 
 @asynccontextmanager
