@@ -34,6 +34,7 @@ spec:
             command: ["sh", "-c", "sha256sum -c /tmp/.cert-hash"]
           initialDelaySeconds: 10
           periodSeconds: 30
+          failureThreshold: 1
         volumeMounts:
         - name: server-cert
           mountPath: /tls
