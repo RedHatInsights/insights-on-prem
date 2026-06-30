@@ -55,9 +55,6 @@ TLS_KEY = os.path.join(TLS_DIR, "tls.key")
 CLIENT_CA_PATH = os.path.join(TLS_DIR, "client-ca", "ca.crt")
 
 
-_task_tracker = BackgroundTaskTracker()
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     config = load_config()
@@ -75,12 +72,13 @@ async def lifespan(app: FastAPI):
     # Initialize processor config and components
     load_insights_components(config)
 
+    task_tracker = BackgroundTaskTracker()
     app.state.processor_service = ProcessorService(config)
     app.state.upload_service = UploadService(
         app.state.processor_service,
         config,
         session_factory,
-        task_tracker=_task_tracker,
+        task_tracker=task_tracker,
     )
     app.state.content_service = ContentService(YAMLContentParser())
     app.state.report_service = ReportService(app.state.content_service)
@@ -96,13 +94,13 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("Shutting down: waiting for in-flight background tasks...")
-    drained = await asyncio.to_thread(_task_tracker.wait_until_idle, 270)
+    drained = await asyncio.to_thread(task_tracker.wait_until_idle, 270)
     if drained:
         logger.info("All background tasks finished")
     else:
         logger.warning(
             "Shutdown timeout: %d background tasks still running",
-            _task_tracker.active_count,
+            task_tracker.active_count,
         )
 
     cleanup_task.cancel()
