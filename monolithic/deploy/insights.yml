@@ -10,14 +10,30 @@ spec:
       labels:
         app: insights-on-prem
     spec:
+      terminationGracePeriodSeconds: 300
       serviceAccountName: insights-on-prem
       containers:
       - name: insights-on-prem
-        image: quay.io/jipapous/insights-on-prem-poc:latest
+        image: quay.io/ccxdev/insights-on-premise-poc:latest
+        command: ["sh", "-c"]
+        args:
+          - |
+            sha256sum /tls/tls.crt /tls/client-ca/ca.crt > /tmp/.cert-hash &&
+            exec python -m app.main
         ports:
         - containerPort: 8443
           name: https
           protocol: TCP
+        readinessProbe:
+          tcpSocket:
+            port: 8443
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          exec:
+            command: ["sh", "-c", "sha256sum -c /tmp/.cert-hash"]
+          initialDelaySeconds: 10
+          periodSeconds: 30
         volumeMounts:
         - name: server-cert
           mountPath: /tls
