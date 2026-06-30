@@ -161,6 +161,37 @@ spec:
                     name: insights-on-prem-server-issuer
                     kind: Issuer
 
+    # --- Trigger rolling restart on cert renewal ---
+    # When cert-manager renews the server certificate, the Secret content
+    # changes. This policy patches the Deployment's pod template annotation
+    # with the cert's hash, triggering a rolling update. Kubernetes creates
+    # a new pod with the fresh cert, waits for it to be ready, then sends
+    # SIGTERM to the old pod (which drains background tasks before exiting).
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: insights-on-prem-cert-rollout
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates-raw: |
+            {{- $secret := (lookup "v1" "Secret" "insights-on-prem-poc" "insights-on-prem-server-tls") }}
+            {{- if $secret.data }}
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: apps/v1
+                kind: Deployment
+                metadata:
+                  name: insights-on-prem
+                  namespace: insights-on-prem-poc
+                spec:
+                  template:
+                    metadata:
+                      annotations:
+                        cert-hash: '{{ index $secret.data "tls.crt" | base64dec | autoindent | sha256sum }}'
+            {{- end }}
+
     # --- Sync server CA to ConfigMap for spoke distribution ---
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
