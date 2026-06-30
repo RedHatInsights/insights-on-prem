@@ -31,6 +31,7 @@ echo "8. Setting up cert-manager and certificates..."
 # The Policy creates CAs, issuers, and server cert once cert-manager is ready.
 oc apply -f deploy/cert-manager.yml
 echo "    Waiting for cert-manager..."
+oc wait namespace/cert-manager --for=jsonpath='{.status.phase}=Active' --timeout=300s
 oc wait deployment/cert-manager -n cert-manager --for=condition=Available --timeout=300s
 
 # The pod will stay in ContainerCreating until cert-manager issues the server
