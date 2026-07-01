@@ -226,7 +226,7 @@ spec:
     - requiredClusterSelector:
         labelSelector:
           matchLabels:
-            name: local-cluster
+            local-cluster: "true"
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding
