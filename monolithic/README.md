@@ -94,6 +94,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 ### Prerequisites
 - OpenShift cluster with ACM installed
 - MultiClusterHub created in `open-cluster-management` namespace (it can take several minutes before all components are started)
+- Hub cluster self-management enabled (default ACM behavior). The hub must be imported into ACM as a managed cluster (with the `local-cluster: "true"` label) so that Policies can target it for certificate management.
 - Quay pull secret for `ccxdev/insights-on-premise-poc` repository saved as `deploy/ccxdev-insights-on-prem-poc-secret.yml`
 - (optional) Have Multicluster Observability Operator deployed according to [these instructions](https://github.com/stolostron/multicluster-observability-operator/tree/main?tab=readme-ov-file#run-the-operator-in-the-cluster) - required for upgrade risk predictions
 - (optional) TechPreview enabled on the hub cluster — required for on-demand data gathering on clusters running OpenShift versions <= 4.21. **Warning:** this is irreversible.

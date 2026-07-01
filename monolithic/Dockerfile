@@ -55,8 +55,8 @@ COPY config.yml ./
 # Copy rules content from rules image
 COPY --from=rules /app/content/content /app/content
 
-EXPOSE 8000
+EXPOSE 8000 8443
 
 USER 1001
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "app.main"]

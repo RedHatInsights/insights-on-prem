@@ -5,10 +5,12 @@ import contextlib
 import json
 import logging
 import os
+import ssl
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
+import uvicorn
 from fastapi import (
     BackgroundTasks,
     Depends,
@@ -43,8 +45,14 @@ from app.services.report_service import ReportService
 from app.services.thanos_service import ThanosService
 from app.services.upgrade_prediction_service import UpgradePredictionService
 from app.services.upload_service import UploadService
+from app.utils.task_tracker import BackgroundTaskTracker
 
 logger = logging.getLogger(__name__)
+
+TLS_DIR = "/tls"
+TLS_CERT = os.path.join(TLS_DIR, "tls.crt")
+TLS_KEY = os.path.join(TLS_DIR, "tls.key")
+CLIENT_CA_PATH = os.path.join(TLS_DIR, "client-ca", "ca.crt")
 
 
 @asynccontextmanager
@@ -64,9 +72,13 @@ async def lifespan(app: FastAPI):
     # Initialize processor config and components
     load_insights_components(config)
 
+    task_tracker = BackgroundTaskTracker()
     app.state.processor_service = ProcessorService(config)
     app.state.upload_service = UploadService(
-        app.state.processor_service, config, session_factory
+        app.state.processor_service,
+        config,
+        session_factory,
+        task_tracker=task_tracker,
     )
     app.state.content_service = ContentService(YAMLContentParser())
     app.state.report_service = ReportService(app.state.content_service)
@@ -81,7 +93,16 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Cancel cleanup task on shutdown
+    logger.info("Shutting down: waiting for in-flight background tasks...")
+    drained = await asyncio.to_thread(task_tracker.wait_until_idle, 270)
+    if drained:
+        logger.info("All background tasks finished")
+    else:
+        logger.warning(
+            "Shutdown timeout: %d background tasks still running",
+            task_tracker.active_count,
+        )
+
     cleanup_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await cleanup_task
@@ -415,12 +436,29 @@ async def http_exception_handler(request, exc: HTTPException):
     )
 
 
-if __name__ == "__main__":
-    import uvicorn
+def start_server():
+    """Start uvicorn — plain HTTP or mTLS depending on MTLS_ENABLED."""
+    config = load_config()
 
-    uvicorn.run(
-        "app.main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-    )
+    if not config.mtls_enabled:
+        uvi_config = uvicorn.Config(app, host="0.0.0.0", port=8000)
+        uvicorn.Server(uvi_config).run()
+        return
+
+    ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
+    ssl_context.load_cert_chain(TLS_CERT, TLS_KEY)
+    ssl_context.load_verify_locations(cafile=CLIENT_CA_PATH)
+    ssl_context.verify_mode = ssl.CERT_REQUIRED
+
+    app.state.ssl_context = ssl_context
+
+    uvi_config = uvicorn.Config(app, host="0.0.0.0", port=8443)
+    uvi_config.load()
+    uvi_config.ssl = ssl_context
+
+    uvicorn.Server(uvi_config).run()
+
+
+if __name__ == "__main__":
+    start_server()
