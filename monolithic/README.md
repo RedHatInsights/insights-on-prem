@@ -156,7 +156,7 @@ Create a `DataGather` custom resource:
 
 ```bash
 oc apply -f - <<'EOF'
-apiVersion: insights.openshift.io/v1alpha2
+apiVersion: insights.openshift.io/v1
 kind: DataGather
 metadata:
   name: on-demand-test
