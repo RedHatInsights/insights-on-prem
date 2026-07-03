@@ -11,18 +11,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 UI_TESTS="$SCRIPT_DIR/tests/ui"
 CLUSTER_ID=$(oc get clusterversion version -o jsonpath='{.spec.clusterID}')
 
-# Custom console image with UPGRADE_RISKS_PREDICTION_URL env var support baked in.
-# Built from the original ACM console image with a one-line change - for testing only.
-# See README "Custom console image for URP" section for details.
-CONSOLE_IMAGE="quay.io/ccxdev/insights-on-prem-lsolarov-console:latest"
-
 # Capture original values of deployments we mutate so they can be restored on exit.
 ORIG_THANOS_LOOKBACK=$(oc get deployment insights-on-prem -n insights-on-prem-poc \
   -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="THANOS_QUERY_LOOKBACK_MINUTES")].value}' 2>/dev/null || echo "")
-ORIG_CONSOLE_IMAGE=$(oc get deployment console-chart-console-v2 -n open-cluster-management \
-  -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
-ORIG_CONSOLE_URP_URL=$(oc get deployment console-chart-console-v2 -n open-cluster-management \
-  -o json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(next((e.get('value','') for e in d['spec']['template']['spec']['containers'][0].get('env',[]) if e['name']=='UPGRADE_RISKS_PREDICTION_URL'), ''))" 2>/dev/null || echo "")
 
 restore() {
   echo "Restoring deployments to original state..."
@@ -32,17 +23,6 @@ restore() {
   else
     oc set env deployment/insights-on-prem -n insights-on-prem-poc \
       THANOS_QUERY_LOOKBACK_MINUTES- 2>/dev/null || true
-  fi
-  if [ -n "$ORIG_CONSOLE_IMAGE" ]; then
-    oc set image deployment/console-chart-console-v2 -n open-cluster-management \
-      console="$ORIG_CONSOLE_IMAGE" 2>/dev/null || true
-  fi
-  if [ -n "$ORIG_CONSOLE_URP_URL" ]; then
-    oc set env deployment/console-chart-console-v2 -n open-cluster-management \
-      UPGRADE_RISKS_PREDICTION_URL="$ORIG_CONSOLE_URP_URL" 2>/dev/null || true
-  else
-    oc set env deployment/console-chart-console-v2 -n open-cluster-management \
-      UPGRADE_RISKS_PREDICTION_URL- 2>/dev/null || true
   fi
 }
 trap restore EXIT
@@ -101,24 +81,7 @@ echo "   Route: $ON_PREM_URP_URL"
 
 # ---------------------------------------------------------------------------
 echo ""
-echo "5. Deploying custom console image with UPGRADE_RISKS_PREDICTION_URL support..."
-# ---------------------------------------------------------------------------
-# The ACM console hardcodes console.redhat.com for URP calls. This custom image
-# is built from the original console image with a one-line change that makes it
-# read the URL from UPGRADE_RISKS_PREDICTION_URL env var instead — for testing only.
-# Once the equivalent change lands in stolostron/console, this step reduces to
-# just the oc set env below.
-oc set image deployment/console-chart-console-v2 -n open-cluster-management \
-  console=$CONSOLE_IMAGE
-oc patch deployment console-chart-console-v2 -n open-cluster-management --type=strategic \
-  -p='{"spec":{"template":{"spec":{"containers":[{"name":"console","imagePullPolicy":"Always"}]}}}}'
-oc set env deployment/console-chart-console-v2 -n open-cluster-management \
-  UPGRADE_RISKS_PREDICTION_URL=$ON_PREM_URP_URL
-oc rollout status deployment/console-chart-console-v2 -n open-cluster-management --timeout=120s
-
-# ---------------------------------------------------------------------------
-echo ""
-echo "6. Waiting for alerts to reach Thanos (~2-5 min)..."
+echo "5. Waiting for alerts to reach Thanos (~2-5 min)..."
 # ---------------------------------------------------------------------------
 TOKEN=$(oc exec deployment/insights-on-prem -n insights-on-prem-poc -- cat /var/run/secrets/kubernetes.io/serviceaccount/token)
 for _ in $(seq 1 10); do
@@ -134,7 +97,7 @@ done
 
 # ---------------------------------------------------------------------------
 echo ""
-echo "7. Verifying URP data comes from on-prem via the actual console route..."
+echo "6. Verifying URP data comes from on-prem via the actual console route..."
 # ---------------------------------------------------------------------------
 # Call ON_PREM_URP_URL (the HTTPS batch endpoint the console uses) with the
 # same batch payload the console sends. This exercises the full path:

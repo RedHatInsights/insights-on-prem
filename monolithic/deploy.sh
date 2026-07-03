@@ -77,29 +77,25 @@ oc set volume deployment/insights-client -n open-cluster-management \
 echo "16. Waiting for insights-client to roll out..."
 oc rollout status deployment/insights-client -n open-cluster-management --timeout=120s
 
-echo "17. Configuring ACM console for upgrade risk predictions..."
-# The ACM console hardcodes console.redhat.com for URP — deploy a custom image that
-# reads UPGRADE_RISKS_PREDICTION_URL env var instead (see README for details).
-# Must be done AFTER pausing MCH (step 14), otherwise MCH reverts the image.
-# Reuse the existing pull secret (same ccxdev+insights_on_prem_poc robot account).
-# Copy it to open-cluster-management so the console deployment can pull the image.
-oc get secret ccxdev-insights-on-prem-poc-pull-secret -n insights-on-prem-poc -o json | \
-  python3 -c "import sys,json; d=json.load(sys.stdin); d['metadata']={'name':'ccxdev-insights-on-prem-poc-pull-secret','namespace':'open-cluster-management'}; print(json.dumps(d))" | \
-  oc apply -f -
-oc set image deployment/console-chart-console-v2 -n open-cluster-management \
-  console=quay.io/ccxdev/insights-on-prem-lsolarov-console:latest
-# Strategic merge patch appends to imagePullSecrets by name rather than replacing the list.
-oc patch deployment console-chart-console-v2 -n open-cluster-management --type=strategic \
-  -p='{"spec":{"template":{"spec":{"imagePullSecrets":[{"name":"ccxdev-insights-on-prem-poc-pull-secret"}],"containers":[{"name":"console","imagePullPolicy":"Always"}]}}}}'
-# UPGRADE_RISKS_PREDICTION_URL is set by test_ui.sh after the route is created
+echo "17. Pointing ACM console URP to the on-prem service..."
+oc set env deployment/console-chart-console-v2 -n open-cluster-management \
+  UPGRADE_RISKS_PREDICTION_URL=https://insights-operator-proxy.openshift-insights.svc:8443/api/insights-results-aggregator/v2/upgrade-risks-prediction \
+  NODE_EXTRA_CA_CERTS=/service-ca/service-ca.crt
+oc set volume deployment/console-chart-console-v2 -n open-cluster-management \
+  --add --overwrite \
+  --name=service-ca \
+  --type=configmap \
+  --configmap-name=insights-on-prem-service-ca \
+  --mount-path=/service-ca \
+  --read-only=true
 oc rollout status deployment/console-chart-console-v2 -n open-cluster-management --timeout=120s
 
 echo ""
 echo "=== Deployment Complete ==="
 echo ""
 echo "IMPORTANT: MultiClusterHub operator is PAUSED (mch-pause=true annotation)"
-echo "           This prevents MCH from reverting CCX_SERVER and the console image."
+echo "           This prevents MCH from reverting CCX_SERVER and UPGRADE_RISKS_PREDICTION_URL."
 echo "           If you unpause MCH, re-run deploy.sh to restore these changes."
 echo "           To unpause: oc annotate multiclusterhub multiclusterhub -n open-cluster-management mch-pause-"
 echo ""
-echo "Next: run test_ui.sh to set up test data and configure URP routing."
+echo "Next: run test_ui.sh to set up test data and verify URP routing."

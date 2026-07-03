@@ -267,7 +267,7 @@ The Insights section of that page has four panels. Here is what backs each one a
 
 ### Update risk predictions
 
-**Source:** The ACM console backend forwards URP calls to `console.redhat.com`. The URL is now configurable via the `UPGRADE_RISKS_PREDICTION_URL` env var ([CCXDEV-16237](https://redhat.atlassian.net/browse/CCXDEV-16237), [merged](https://github.com/stolostron/console/pull/5892)). `test_ui.sh` sets this env var to point to the on-prem service. See the [Custom console image for URP](#custom-console-image-for-urp) section below.
+**Source:** The ACM console backend forwards URP calls to `console.redhat.com`. The URL is configurable via the `UPGRADE_RISKS_PREDICTION_URL` env var ([CCXDEV-16237](https://redhat.atlassian.net/browse/CCXDEV-16237), [merged](https://github.com/stolostron/console/pull/5892)). `deploy.sh` sets this env var to point to the on-prem service.
 
 ### Alerts
 
@@ -285,32 +285,6 @@ Run `test_ui.sh` after `deploy.sh` to set up test data that triggers all four se
 
 ```bash
 ./test_ui.sh
-```
-
-#### Custom console image for URP
-
-`test_ui.sh` deploys a custom console image (`quay.io/ccxdev/insights-on-prem-lsolarov-console:latest`) built from `stolostron/console` main, which already includes `UPGRADE_RISKS_PREDICTION_URL` env var support ([CCXDEV-16237](https://redhat.atlassian.net/browse/CCXDEV-16237)). It is needed only until a new ACM release ships with this change.
-
-> **Note:** The image is private. `deploy.sh` automatically copies the existing `ccxdev-insights-on-prem-poc-pull-secret` (created in step 3) to `open-cluster-management` — no extra setup needed since it uses the same `ccxdev+insights_on_prem_poc` robot account.
-> **Note:** [CCXDEV-16237](https://redhat.atlassian.net/browse/CCXDEV-16237) is merged — the custom image is for testing only until a new ACM release ships with this change.
-
-```typescript
-// Before (hardcoded):
-const insightsPath = 'https://console.redhat.com/api/insights-results-aggregator/v2/upgrade-risks-prediction'
-
-// After (env var with fallback):
-const insightsPath = process.env.UPGRADE_RISKS_PREDICTION_URL ?? 'https://console.redhat.com/api/insights-results-aggregator/v2/upgrade-risks-prediction'
-```
-
-Once a new ACM release ships with this change, the custom image is no longer needed — `test_ui.sh` reduces to just setting `UPGRADE_RISKS_PREDICTION_URL` to the HTTPS route of the on-prem service.
-
-To rebuild the custom image (no code changes needed — the change is already in `stolostron/console` main):
-```bash
-git clone git@github.com:stolostron/console.git
-cd backend && npm install && npm run build
-docker buildx build --platform linux/amd64,linux/arm64 \
-  -t quay.io/ccxdev/insights-on-prem-lsolarov-console:latest \
-  --push .
 ```
 
 ## Database Access
