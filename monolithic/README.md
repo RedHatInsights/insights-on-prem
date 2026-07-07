@@ -106,7 +106,6 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 ### Deploy
 
 ```bash
-cd monolithic
 oc apply -f deploy/
 ```
 
