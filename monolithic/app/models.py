@@ -25,6 +25,11 @@ class Report(Base):
     gathered_at = Column(DateTime, nullable=True)
 
     @classmethod
+    def delete_older_than(cls, db: Session, cutoff: datetime) -> int:
+        """Delete all reports not checked since the given cutoff."""
+        return db.query(cls).filter(cls.last_checked_at < cutoff).delete()
+
+    @classmethod
     def upsert(
         cls,
         db: Session,
@@ -145,6 +150,11 @@ class RuleHit(Base):
             .one()
         )
         return result
+
+    @classmethod
+    def delete_older_than(cls, db: Session, cutoff: datetime) -> int:
+        """Delete all rule hits not updated since the given cutoff."""
+        return db.query(cls).filter(cls.updated_at < cutoff).delete()
 
     @classmethod
     def delete_for_cluster(cls, db: Session, cluster_id: str) -> int:

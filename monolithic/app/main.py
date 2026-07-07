@@ -27,7 +27,7 @@ from app.config_loader import load_config, load_insights_components
 from app.content_parser_yaml import YAMLContentParser
 from app.database import get_db, init_db
 from app.exceptions import ValidationError
-from app.models import RequestReport
+from app.models import Report, RequestReport, RuleHit
 from app.schemas import (
     BatchUpgradeRisksPredictionRequest,
     BatchUpgradeRisksPredictionResponse,
@@ -86,10 +86,7 @@ async def lifespan(app: FastAPI):
     app.state.upgrade_prediction_service = UpgradePredictionService()
     logger.info("All services initialized successfully")
 
-    # Start periodic cleanup of old request reports
-    cleanup_task = asyncio.create_task(
-        _cleanup_old_request_reports(session_factory, config)
-    )
+    cleanup_task = asyncio.create_task(_cleanup_old_records(session_factory, config))
 
     yield
 
@@ -108,20 +105,25 @@ async def lifespan(app: FastAPI):
         await cleanup_task
 
 
-async def _cleanup_old_request_reports(session_factory, config):
-    """Periodically delete old request report records."""
+async def _cleanup_old_records(session_factory, config):
+    """Periodically delete old records from all tables."""
     while True:
         db = session_factory()
         try:
             cutoff = datetime.now(timezone.utc) - timedelta(
-                hours=config.request_report_retention_hours
+                hours=config.db_retention_hours
             )
-            deleted = RequestReport.delete_older_than(db, cutoff)
+            for model, label in [
+                (Report, "reports"),
+                (RuleHit, "rule hits"),
+                (RequestReport, "request reports"),
+            ]:
+                deleted = model.delete_older_than(db, cutoff)
+                if deleted:
+                    logger.info(f"Cleaned up {deleted} old {label}")
             db.commit()
-            if deleted:
-                logger.info(f"Cleaned up {deleted} old request reports")
         except Exception as e:
-            logger.error(f"Request report cleanup failed: {e}")
+            logger.error(f"DB cleanup failed: {e}")
             try:
                 db.rollback()
             except Exception as rollback_err:
@@ -129,8 +131,7 @@ async def _cleanup_old_request_reports(session_factory, config):
         finally:
             db.close()
 
-        # Wait for configured time until next cleanup
-        await asyncio.sleep(config.request_report_cleanup_interval_minutes * 60)
+        await asyncio.sleep(config.db_cleanup_interval_minutes * 60)
 
 
 # Create FastAPI app
