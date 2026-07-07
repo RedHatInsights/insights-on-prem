@@ -1,2 +1,2 @@
 __pycache__/
-monolithic/deploy/ccxdev-insights-on-prem-poc-secret.yml
+monolithic/deploy/02-pull-secret.yml

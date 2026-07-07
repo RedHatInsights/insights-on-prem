@@ -1,0 +1,119 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: insights-on-prem-hub-config
+  namespace: insights-on-prem-poc
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    # --- Pause MCH operator ---
+    # Prevents MCH from reverting our changes to insights-client and console.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: insights-on-prem-mch-pause
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: operator.open-cluster-management.io/v1
+                kind: MultiClusterHub
+                metadata:
+                  name: multiclusterhub
+                  namespace: open-cluster-management
+                  annotations:
+                    mch-pause: "true"
+
+    # --- Configure insights-client ---
+    # Route insights-client through the spoke proxy instead of console.redhat.com.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: insights-on-prem-insights-client
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: apps/v1
+                kind: Deployment
+                metadata:
+                  name: insights-client
+                  namespace: open-cluster-management
+                spec:
+                  template:
+                    spec:
+                      containers:
+                        - name: client
+                          env:
+                            - name: CCX_SERVER
+                              value: "https://insights-operator-proxy.openshift-insights.svc.cluster.local:8443/api/v2"
+                            - name: SSL_CERT_DIR
+                              value: "/service-ca"
+                            - name: POLL_INTERVAL
+                              value: "1"
+                          volumeMounts:
+                            - name: service-ca
+                              mountPath: /service-ca
+                              readOnly: true
+                      volumes:
+                        - name: service-ca
+                          configMap:
+                            name: insights-on-prem-proxy-ca
+
+    # --- Configure ACM console for URP ---
+    # Point upgrade risk predictions to the on-prem service via the spoke proxy.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: insights-on-prem-console-config
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: apps/v1
+                kind: Deployment
+                metadata:
+                  name: console-chart-console-v2
+                  namespace: open-cluster-management
+                spec:
+                  template:
+                    spec:
+                      containers:
+                        - name: console
+                          env:
+                            - name: UPGRADE_RISKS_PREDICTION_URL
+                              value: "https://insights-operator-proxy.openshift-insights.svc:8443/api/insights-results-aggregator/v2/upgrade-risks-prediction"
+                            - name: NODE_EXTRA_CA_CERTS
+                              value: "/service-ca/service-ca.crt"
+                          volumeMounts:
+                            - name: service-ca
+                              mountPath: /service-ca
+                              readOnly: true
+                      volumes:
+                        - name: service-ca
+                          configMap:
+                            name: insights-on-prem-proxy-ca
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: insights-on-prem-hub-config
+  namespace: insights-on-prem-poc
+placementRef:
+  name: insights-on-prem-hub-only
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+subjects:
+  - name: insights-on-prem-hub-config
+    apiGroup: policy.open-cluster-management.io
+    kind: Policy

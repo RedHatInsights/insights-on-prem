@@ -91,7 +91,7 @@ spec:
                   namespace: openshift-insights
                 data:
                   ca-bundle.crt: |
-                    {{hub fromConfigMap "insights-on-prem-poc" "insights-on-prem-service-ca" "ca-bundle.crt" | autoindent hub}}
+                    {{hub fromConfigMap "insights-on-prem-poc" "insights-on-prem-hub-ca" "ca-bundle.crt" | autoindent hub}}
 
     # --- Service CA trust (insights-operator trusts HAProxy's serving cert) ---
     # Merges the spoke's service-ca into the existing Proxy trustedCA ConfigMap
@@ -130,7 +130,7 @@ spec:
                 apiVersion: v1
                 kind: ConfigMap
                 metadata:
-                  name: insights-on-prem-service-ca
+                  name: insights-on-prem-proxy-ca-bundle
                   namespace: openshift-config
                 data:
                   ca-bundle.crt: |
@@ -143,7 +143,7 @@ spec:
                   name: cluster
                 spec:
                   trustedCA:
-                    name: insights-on-prem-service-ca
+                    name: insights-on-prem-proxy-ca-bundle
             {{- end }}
 
     # --- Service CA for insights-client (ACM report retrieval) ---
@@ -165,7 +165,7 @@ spec:
                 apiVersion: v1
                 kind: ConfigMap
                 metadata:
-                  name: insights-on-prem-service-ca
+                  name: insights-on-prem-proxy-ca
                   namespace: open-cluster-management
                   annotations:
                     service.beta.openshift.io/inject-cabundle: "true"

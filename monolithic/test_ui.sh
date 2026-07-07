@@ -1,7 +1,7 @@
 #!/bin/bash
 # test_ui.sh - Sets up test data to verify all four Insights sections in the ACM fleet overview UI.
 #
-# Prerequisites: deploy.sh must have been run first (on-prem service + insights-client configured).
+# Prerequisites: oc apply -f deploy/ must have been run first (on-prem service + insights-client configured).
 #
 # Results are visible at: https://<your-cluster>/multicloud/home/overview
 

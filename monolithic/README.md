@@ -95,7 +95,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 - OpenShift cluster with ACM installed
 - MultiClusterHub created in `open-cluster-management` namespace (it can take several minutes before all components are started)
 - Hub cluster self-management enabled (default ACM behavior). The hub must be imported into ACM as a managed cluster (with the `local-cluster: "true"` label) so that Policies can target it for certificate management.
-- Quay pull secret for `ccxdev/insights-on-premise-poc` repository saved as `deploy/ccxdev-insights-on-prem-poc-secret.yml`
+- Quay pull secret for `ccxdev/insights-on-premise-poc` repository saved as `deploy/02-pull-secret.yml`
 - (optional) Have Multicluster Observability Operator deployed according to [these instructions](https://github.com/stolostron/multicluster-observability-operator/tree/main?tab=readme-ov-file#run-the-operator-in-the-cluster) - required for upgrade risk predictions
 - (optional) TechPreview enabled on the hub cluster — required for on-demand data gathering on clusters running OpenShift versions <= 4.21. **Warning:** this is irreversible.
   ```bash
@@ -106,19 +106,19 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 ### Deploy
 
 ```bash
-./deploy.sh
+oc apply -f deploy/
 ```
 
-This script:
-1. Creates `insights-on-prem-poc` namespace
-2. Deploys PostgreSQL database
-3. Deploys the application and service
-4. Configures `insights-operator` to upload archives to the on-premise service
-5. Pauses MultiClusterHub operator and configures `insights-client` to use the on-premise backend
+This applies all manifests in `deploy/` to the cluster. ACM Policies handle:
+- cert-manager installation and certificate management
+- MCH operator pausing and `insights-client`/console configuration
+- Spoke proxy deployment to managed clusters
+
+Resources converge automatically — Policies retry until dependencies are met, and pods wait for volumes.
 
 #### Secrets
 
-The postgres password is stored in the secret `insights-postgres` in the `insights-on-prem-poc` namespace, defined in `deploy/postgres.yml`. Note that this is not the best practice, so please use the preferred method on your cluster to define the secret. We kept it there to make it easier to deploy the application with a single script and no human intervention.
+The postgres password is stored in the secret `insights-postgres` in the `insights-on-prem-poc` namespace, defined in `deploy/03-postgres.yml`. Note that this is not the best practice, so please use the preferred method on your cluster to define the secret. We kept it there to make it easier to deploy the application without human intervention.
 
 ### Verify Deployment
 
@@ -126,8 +126,8 @@ The postgres password is stored in the secret `insights-postgres` in the `insigh
 # Check pod status
 oc get pods -n insights-on-prem-poc
 
-# Check service
-oc get svc -n insights-on-prem-poc
+# Check policy compliance (all should be Compliant)
+oc get policy -n insights-on-prem-poc
 
 # Verify insights-client configuration
 oc get deployment insights-client -n open-cluster-management -o yaml | grep -A2 'name: CCX_SERVER'
@@ -138,15 +138,11 @@ oc logs -f deployment/insights-on-prem -n insights-on-prem-poc
 
 ### Important Notes
 
-- **MultiClusterHub operator is paused** after deployment (annotation `mch-pause=true`) to prevent it from reverting the `CCX_SERVER` configuration.
-- To unpause the operator:
-  ```bash
-  oc annotate multiclusterhub multiclusterhub -n open-cluster-management mch-pause- --overwrite
-  ```
+- **MultiClusterHub operator is paused** after deployment by the `insights-on-prem-hub-config` Policy. The Policy continuously enforces this — to permanently unpause MCH, delete or disable the Policy first.
 
 ## On-Demand Data Gathering
 
-On-demand data gathering allows triggering Insights data collection outside the regular periodic schedule. Instead of waiting for the next periodic upload (default 2h, set to 1m by `deploy.sh`), you can request an immediate gather-and-upload cycle and get results for that specific request.
+On-demand data gathering allows triggering Insights data collection outside the regular periodic schedule. Instead of waiting for the next periodic upload (default 2h, set to 1m by `deploy/14-hub-config.yml`), you can request an immediate gather-and-upload cycle and get results for that specific request.
 
 > **Note:** Conditional data gathering is not supported at this moment. Disable the `conditional` gatherer in the `DataGather` CR to avoid unnecessary calls to `console.redhat.com` for gathering rules (as shown in the following section).
 
@@ -235,7 +231,7 @@ webhooks:
 EOF
 ```
 
-The command should trigger [webhook_timeout_is_larger_than_default](https://gitlab.cee.redhat.com/ccx/ccx-rules-ocp/-/blob/master/ccx_rules_ocp/external/rules/webhook_timeout_is_larger_than_default.py) rule. Depending on the frequency of archive uploads from Insights Operator (in `deploy.sh` script set to 1 minute for PoC purposes, but default value is 2 hours), the recommendation and the `PolicyReport` should be created. You can check that with this command directly in the ACM cluster:
+The command should trigger [webhook_timeout_is_larger_than_default](https://gitlab.cee.redhat.com/ccx/ccx-rules-ocp/-/blob/master/ccx_rules_ocp/external/rules/webhook_timeout_is_larger_than_default.py) rule. Depending on the frequency of archive uploads from Insights Operator (set to 1 minute for PoC purposes by `deploy/14-hub-config.yml`, but default value is 2 hours), the recommendation and the `PolicyReport` should be created. You can check that with this command directly in the ACM cluster:
 
 ```bash
 oc get policyreport --all-namespaces
@@ -249,7 +245,7 @@ The results of the on-premise pipeline are visible in the ACM fleet overview at:
 https://<your-cluster-api-server>/multicloud/home/overview
 ```
 
-**Before** (`deploy.sh` only, without `test_ui.sh`):
+**Before** (`oc apply -f deploy/` only, without `test_ui.sh`):
 
 ![ACM Fleet Overview - Insights section with no data](docs/fleet-overview-empty.png)
 
@@ -267,7 +263,7 @@ The Insights section of that page has four panels. Here is what backs each one a
 
 ### Update risk predictions
 
-**Source:** The ACM console backend forwards URP calls to `console.redhat.com`. The URL is configurable via the `UPGRADE_RISKS_PREDICTION_URL` env var ([CCXDEV-16237](https://redhat.atlassian.net/browse/CCXDEV-16237), [merged](https://github.com/stolostron/console/pull/5892)). `deploy.sh` sets this env var to point to the on-prem service.
+**Source:** The ACM console backend forwards URP calls to `console.redhat.com`. The URL is configurable via the `UPGRADE_RISKS_PREDICTION_URL` env var ([CCXDEV-16237](https://redhat.atlassian.net/browse/CCXDEV-16237), [merged](https://github.com/stolostron/console/pull/5892)). `deploy/14-hub-config.yml` sets this env var to point to the on-prem service via the spoke proxy.
 
 ### Alerts
 
@@ -281,7 +277,7 @@ The Insights section of that page has four panels. Here is what backs each one a
 
 ### Testing the on-prem pipeline panels
 
-Run `test_ui.sh` after `deploy.sh` to set up test data that triggers all four sections and verifies the data is flowing through the on-prem service (not `console.redhat.com`):
+Run `test_ui.sh` after `oc apply -f deploy/` to set up test data that triggers all four sections and verifies the data is flowing through the on-prem service (not `console.redhat.com`):
 
 ```bash
 ./test_ui.sh
