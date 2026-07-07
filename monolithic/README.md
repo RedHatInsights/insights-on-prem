@@ -95,7 +95,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 - OpenShift cluster with ACM installed
 - MultiClusterHub created in `open-cluster-management` namespace (it can take several minutes before all components are started)
 - Hub cluster self-management enabled (default ACM behavior). The hub must be imported into ACM as a managed cluster (with the `local-cluster: "true"` label) so that Policies can target it for certificate management.
-- Quay pull secret for `ccxdev/insights-on-premise-poc` repository saved as `deploy/ccxdev-insights-on-prem-poc-secret.yml`
+- Quay pull secret for `ccxdev/insights-on-premise-poc` repository saved as `deploy/02-pull-secret.yml`
 - (optional) Have Multicluster Observability Operator deployed according to [these instructions](https://github.com/stolostron/multicluster-observability-operator/tree/main?tab=readme-ov-file#run-the-operator-in-the-cluster) - required for upgrade risk predictions
 - (optional) TechPreview enabled on the hub cluster — required for on-demand data gathering on clusters running OpenShift versions <= 4.21. **Warning:** this is irreversible.
   ```bash
@@ -119,7 +119,7 @@ Resources converge automatically — Policies retry until dependencies are met, 
 
 #### Secrets
 
-The postgres password is stored in the secret `insights-postgres` in the `insights-on-prem-poc` namespace, defined in `deploy/postgres.yml`. Note that this is not the best practice, so please use the preferred method on your cluster to define the secret. We kept it there to make it easier to deploy the application without human intervention.
+The postgres password is stored in the secret `insights-postgres` in the `insights-on-prem-poc` namespace, defined in `deploy/03-postgres.yml`. Note that this is not the best practice, so please use the preferred method on your cluster to define the secret. We kept it there to make it easier to deploy the application without human intervention.
 
 ### Verify Deployment
 
