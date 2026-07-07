@@ -38,11 +38,11 @@ spec:
                         timeout server 30s
 
                     frontend proxy
-                        bind *:8443 ssl crt /tmp/server.pem
+                        bind *:8443 ssl crt /tmp/server.pem ssl-min-ver TLSv1.2
                         default_backend hub
 
                     backend hub
-                        server hub {{hub (lookup "route.openshift.io/v1" "Route" "insights-on-prem-poc" "insights-on-prem").spec.host hub}}:443 ssl crt /tmp/client.pem ca-file /certs/hub-ca/ca-bundle.crt verify required verifyhost {{hub (lookup "route.openshift.io/v1" "Route" "insights-on-prem-poc" "insights-on-prem").spec.host hub}} sni str({{hub (lookup "route.openshift.io/v1" "Route" "insights-on-prem-poc" "insights-on-prem").spec.host hub}})
+                        server hub {{hub (lookup "route.openshift.io/v1" "Route" "insights-on-prem-poc" "insights-on-prem").spec.host hub}}:443 ssl crt /tmp/client.pem ca-file /certs/hub-ca/ca-bundle.crt verify required verifyhost {{hub (lookup "route.openshift.io/v1" "Route" "insights-on-prem-poc" "insights-on-prem").spec.host hub}} sni str({{hub (lookup "route.openshift.io/v1" "Route" "insights-on-prem-poc" "insights-on-prem").spec.host hub}}) ssl-min-ver TLSv1.2
 
     # --- proxy Service ---
     - objectDefinition:
