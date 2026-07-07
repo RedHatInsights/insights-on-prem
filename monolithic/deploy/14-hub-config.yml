@@ -65,7 +65,7 @@ spec:
                       volumes:
                         - name: service-ca
                           configMap:
-                            name: insights-on-prem-service-ca
+                            name: insights-on-prem-proxy-ca
 
     # --- Configure ACM console for URP ---
     # Point upgrade risk predictions to the on-prem service via the spoke proxy.
@@ -102,7 +102,7 @@ spec:
                       volumes:
                         - name: service-ca
                           configMap:
-                            name: insights-on-prem-service-ca
+                            name: insights-on-prem-proxy-ca
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding

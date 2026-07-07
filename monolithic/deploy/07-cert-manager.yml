@@ -209,7 +209,7 @@ spec:
                 apiVersion: v1
                 kind: ConfigMap
                 metadata:
-                  name: insights-on-prem-service-ca
+                  name: insights-on-prem-hub-ca
                   namespace: insights-on-prem-poc
                 data:
                   ca-bundle.crt: |
