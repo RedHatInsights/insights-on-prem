@@ -110,7 +110,9 @@ async def _cleanup_old_records(session_factory, config):
     while True:
         db = session_factory()
         try:
-            cutoff = datetime.now(timezone.utc) - timedelta(hours=config.db_retention_hours)
+            cutoff = datetime.now(timezone.utc) - timedelta(
+                hours=config.db_retention_hours
+            )
             for model, label in [
                 (Report, "reports"),
                 (RuleHit, "rule hits"),
