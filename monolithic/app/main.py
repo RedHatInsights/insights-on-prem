@@ -109,27 +109,25 @@ async def _cleanup_old_records(session_factory, config):
     """Periodically delete old records from all tables."""
     while True:
         db = session_factory()
-        try:
-            cutoff = datetime.now(timezone.utc) - timedelta(
-                hours=config.db_retention_hours
-            )
-            for model, label in [
-                (Report, "reports"),
-                (RuleHit, "rule hits"),
-                (RequestReport, "request reports"),
-            ]:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=config.db_retention_hours)
+        for model, label in [
+            (Report, "reports"),
+            (RuleHit, "rule hits"),
+            (RequestReport, "request reports"),
+        ]:
+            try:
                 deleted = model.delete_older_than(db, cutoff)
                 if deleted:
                     logger.info(f"Cleaned up {deleted} old {label}")
-            db.commit()
-        except Exception as e:
-            logger.error(f"DB cleanup failed: {e}")
-            try:
-                db.rollback()
-            except Exception as rollback_err:
-                logger.error(f"Rollback also failed: {rollback_err}")
-        finally:
-            db.close()
+                db.commit()
+            except Exception as e:
+                logger.error(f"DB cleanup failed: {e}")
+                try:
+                    db.rollback()
+                except Exception as rollback_err:
+                    logger.error(f"Rollback also failed: {rollback_err}")
+
+        db.close()
 
         await asyncio.sleep(config.db_cleanup_interval_minutes * 60)
 
