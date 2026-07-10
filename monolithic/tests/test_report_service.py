@@ -1,7 +1,7 @@
 """Tests for ReportService."""
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
 
 import pytest
@@ -230,3 +230,63 @@ def test_get_cluster_report_v2_timestamps(database, report_service):
 
     assert result.meta.last_checked_at == "2024-01-15T11:00:00Z"
     assert result.meta.gathered_at == "2024-01-15T10:00:00Z"
+
+
+def test_report_cleanup_removes_old_records(database):
+    """Test that Report.delete_older_than removes stale clusters."""
+    now = datetime.now(timezone.utc)
+    database.add(
+        Report(
+            cluster="old-cluster",
+            report="{}",
+            last_checked_at=now - timedelta(hours=48),
+        )
+    )
+    database.add(
+        Report(
+            cluster="recent-cluster",
+            report="{}",
+            last_checked_at=now,
+        )
+    )
+    database.commit()
+
+    deleted = Report.delete_older_than(database, now - timedelta(hours=24))
+    database.commit()
+
+    assert deleted == 1
+    assert database.query(Report).filter_by(cluster="old-cluster").first() is None
+    assert (
+        database.query(Report).filter_by(cluster="recent-cluster").first() is not None
+    )
+
+
+def test_rule_hit_cleanup_removes_old_records(database):
+    """Test that RuleHit.delete_older_than removes stale rule hits."""
+    now = datetime.now(timezone.utc)
+    database.add(
+        RuleHit(
+            cluster_id="c1",
+            rule_fqdn="old.rule",
+            error_key="E1",
+            updated_at=now - timedelta(hours=48),
+        )
+    )
+    database.add(
+        RuleHit(
+            cluster_id="c1",
+            rule_fqdn="recent.rule",
+            error_key="E2",
+            updated_at=now,
+        )
+    )
+    database.commit()
+
+    deleted = RuleHit.delete_older_than(database, now - timedelta(hours=24))
+    database.commit()
+
+    assert deleted == 1
+    assert database.query(RuleHit).filter_by(rule_fqdn="old.rule").first() is None
+    assert (
+        database.query(RuleHit).filter_by(rule_fqdn="recent.rule").first() is not None
+    )

@@ -285,7 +285,7 @@ Run `test_ui.sh` after `oc apply -f deploy/` to set up test data that triggers a
 
 ## Database Access
 
-The application deploys its own PostgreSQL database.
+The application deploys its own PostgreSQL database. Data older than 24 hours is cleaned up automatically by default (configurable via `DB_RETENTION_HOURS`).
 
 **Connect to database:**
 ```bash
