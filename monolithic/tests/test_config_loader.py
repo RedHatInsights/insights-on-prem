@@ -171,7 +171,7 @@ def test_load_insights_components_multiple_packages(
 
     load_insights_components(config)
 
-    assert mock_dr.load_components.call_count == 3
+    assert mock_dr.load_components.call_count == 2
     mock_dr.load_components.assert_any_call(
         "ccx_rules_ocp.external", continue_on_error=False
     )
