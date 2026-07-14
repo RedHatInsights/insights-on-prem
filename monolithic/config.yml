@@ -18,9 +18,9 @@ service:
   # Maximum unpacked archive size (-1 for unlimited)
   unpacked_archive_size_limit: -1
 
-  # On-demand request report cleanup
-  request_report_retention_hours: 24
-  request_report_cleanup_interval_minutes: 60
+  # Database cleanup (all tables)
+  db_retention_hours: 24
+  db_cleanup_interval_minutes: 60
 
   # Thanos configuration
   thanos_url: https://rbac-query-proxy.open-cluster-management-observability.svc.cluster.local:8443
