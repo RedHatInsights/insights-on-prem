@@ -4,11 +4,16 @@ FROM registry.redhat.io/lightspeed-services-ocp/ocp-rules-rhel9:2026.06.30 AS ru
 USER root
 
 # Extract installed packages list (exclude ccx packages as those won't be installed by pip)
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN /opt/venv/bin/pip freeze | grep -Ev '^ccx-' > /tmp/base_requirements.txt && \
     mkdir -p /extracted/ccx && \
     cp -r /opt/venv/lib/python3.12/site-packages/ccx_* /extracted/ccx/
 
+# fix Hadolint DL3002 warning: Last USER should not be root
+USER default
+
 # Stage 2: Build application image
+# hadolint ignore=DL3007  # We prefer to use latest to ensure CVEs are fixed as soon as possible
 FROM registry.access.redhat.com/ubi9-minimal:latest
 
 ENV HOME=/app \
@@ -21,17 +26,19 @@ ENV HOME=/app \
 WORKDIR $HOME
 
 # Install system dependencies and create venv in one layer
+COPY requirements-build.txt .
+# hadolint ignore=DL3041  # We prefer to use latest versions of dnf pkgs
 RUN microdnf install --nodocs -y sqlite python3.12 python3.12-devel gcc postgresql-devel file tar unzip && \
     python3.12 -m venv $VENV && \
     update-ca-trust && \
-    pip install --no-cache-dir -U pip setuptools wheel && \
+    pip install --no-cache-dir -U -r requirements-build.txt && \
     microdnf clean all && \
     mkdir -p /tmp/insights-uploads && chmod 777 /tmp/insights-uploads
 
 # Copy ccx packages from rules image to site-packages
 COPY --from=rules /extracted/ccx /tmp/ccx
-RUN SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[0])") && \
-    cp -r /tmp/ccx/* ${SITE_PACKAGES}/ && \
+RUN SITE_PACKAGES="$(python3 -c 'import site; print(site.getsitepackages()[0])')" && \
+    cp -r /tmp/ccx/* "${SITE_PACKAGES}/" && \
     rm -rf /tmp/ccx
 
 # Copy base requirements from rules image and project requirements
