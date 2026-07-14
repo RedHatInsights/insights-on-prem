@@ -15,7 +15,6 @@ alembic>=1.13.0
 # Insights-core and CCX packages
 insights-core>=3.2.26
 ccx-rules-ocp>=2026.02.13
-ccx-rules-processing>=0.0.3
 
 # HTTP client
 httpx>=0.25.0
