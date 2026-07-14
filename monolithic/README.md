@@ -64,6 +64,8 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 ## Running Locally with Docker Compose
 
+You can also use `podman-compose`. The commands are the same.
+
 1. **Start services:**
    ```bash
    docker-compose up -d
@@ -71,7 +73,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 2. **Run database migrations:**
    ```bash
-   docker-compose exec app alembic upgrade head
+   docker-compose exec app alembic -c migrations/alembic.ini upgrade head
    ```
 
 3. **Verify:**
