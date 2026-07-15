@@ -165,19 +165,15 @@ def test_load_insights_components_multiple_packages(
     config = AppConfig(
         plugin_packages=[
             "ccx_rules_ocp.external",
-            "ccx_rules_processing",
             "custom_package",
         ],
     )
 
     load_insights_components(config)
 
-    assert mock_dr.load_components.call_count == 3
+    assert mock_dr.load_components.call_count == 2
     mock_dr.load_components.assert_any_call(
         "ccx_rules_ocp.external", continue_on_error=False
-    )
-    mock_dr.load_components.assert_any_call(
-        "ccx_rules_processing", continue_on_error=False
     )
     mock_dr.load_components.assert_any_call("custom_package", continue_on_error=False)
 

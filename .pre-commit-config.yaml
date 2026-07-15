@@ -51,11 +51,11 @@ repos:
           - '--select=UP,F632,E,W,F,I,N,B,C4,SIM'
       - id: ruff-format
 
-  # Disabled - too many warnings to fix right now
-  # - repo: https://github.com/AleksaC/hadolint-py
-  #   rev: v2.14.0
-  #   hooks:
-  #     - id: hadolint
+  - repo: https://github.com/AleksaC/hadolint-py
+    rev: v2.14.0
+    hooks:
+      - id: hadolint
+
 
   - repo: https://github.com/renovatebot/pre-commit-hooks
     rev: 43.259.2

@@ -1,3 +1,4 @@
+# hadolint ignore=DL3007  # We prefer to use latest as this image is not used in production
 FROM registry.access.redhat.com/ubi9-minimal:latest
 
 ENV HOME=/tests \
@@ -12,6 +13,7 @@ WORKDIR $HOME
 # oc is NOT baked into this image — it is downloaded from the target OCP cluster's
 # downloads route to guarantee version alignment:
 #   curl -kL https://downloads-openshift-console.apps.<cluster>/amd64/linux/oc.tar.gz | tar xz -C /usr/local/bin
+# hadolint ignore=DL3013,DL3041 # it's fine not to pin pip versions
 RUN microdnf install --nodocs -y \
         python3.12 \
         curl-minimal \

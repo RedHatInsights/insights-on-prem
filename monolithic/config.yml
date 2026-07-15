@@ -30,7 +30,6 @@ service:
 plugins:
   packages:
     - ccx_rules_ocp.external
-    - ccx_rules_processing
   configs:
     - name: ccx_ocp_core.config.telemeter.TelemeterServiceConfig
       enabled: false
