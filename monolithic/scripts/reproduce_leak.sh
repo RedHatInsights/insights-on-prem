@@ -6,19 +6,16 @@
 # launches monitoring + load generation, and prints a summary on exit.
 #
 # Usage:
-#   ./reproduce_leak.sh                # 60 min, 30% bad archives
-#   ./reproduce_leak.sh 120            # 120 min, 30% bad archives
+#   ./reproduce_leak.sh                # 30 min, 100% bad archives, max speed
+#   ./reproduce_leak.sh 60             # 60 min
 #   ./reproduce_leak.sh 120 0.5        # 120 min, 50% bad archives
-#   ./reproduce_leak.sh 60 0.0         # 60 min, all valid archives
-#   ./reproduce_leak.sh 60 0.3 --burst # 60 min, burst mode
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-DURATION_MIN="${1:-60}"
-BAD_RATIO="${2:-0.3}"
-EXTRA_ARGS="${3:-}"
+DURATION_MIN="${1:-30}"
+BAD_RATIO="${2:-1.0}"
 OUTPUT_DIR="${SCRIPT_DIR}/monitoring_$(date +%Y%m%d_%H%M%S)"
 MONITOR_PID=""
 SEND_PID=""
@@ -39,42 +36,32 @@ cleanup() {
         wait "$MONITOR_PID" 2>/dev/null || true
     fi
 
-    echo ""
-    echo "=== Memory Summary ==="
-    if [ -d "$OUTPUT_DIR" ]; then
-        for csv in "$OUTPUT_DIR"/*_podman_stats.csv; do
-            [ -f "$csv" ] || continue
-            container=$(basename "$csv" | sed 's/_podman_stats.csv//')
-            awk -F',' -v name="$container" 'NR>1 && $4+0>0 {
-                if(!first) { first=$4+0; first_t=$2 }
-                last=$4+0; last_t=$2
-            } END {
-                if(first && last_t>first_t) {
-                    hours=(last_t-first_t)/60
-                    rate=(last-first)/hours
-                    printf "  %-20s start=%.1f MB  end=%.1f MB  delta=%+.1f MB  rate=%+.2f MB/hr\n", name, first, last, last-first, rate
-                }
-            }' "$csv"
-        done
-
-        if [ -f "$OUTPUT_DIR/SUMMARY.txt" ]; then
-            echo ""
-            cat "$OUTPUT_DIR/SUMMARY.txt"
-        fi
-
+    # Memory report for insights-app
+    CSV="$OUTPUT_DIR/insights-app_podman_stats.csv"
+    if [ -f "$CSV" ] && [ "$(wc -l < "$CSV")" -gt 1 ]; then
         echo ""
-        echo "Monitoring data: $OUTPUT_DIR/"
+        awk -F',' -v dur="$DURATION_MIN" '
+        NR>1 && $4+0>0 {
+            if(!n++) { first=$4+0; first_t=$2 }
+            last=$4+0; last_t=$2
+        } END {
+            if(n>0) {
+                mins = last_t - first_t
+                if(mins < 1) mins = 1
+                printf "=== Memory Report (insights-app) ===\n"
+                printf "  Start:    %.1f MiB\n", first
+                printf "  End:      %.1f MiB\n", last
+                printf "  Delta:    %+.1f MiB\n", last-first
+                printf "  Duration: %d min\n", mins
+                printf "  Rate:     %+.2f MiB/hr\n", (last-first)/(mins/60)
+            }
+        }' "$CSV"
+        echo ""
+        echo "Full data: $OUTPUT_DIR/"
     fi
 
-    echo ""
-    read -r -p "Stop containers? (podman compose down) [y/N] " answer
-    if [[ "$answer" =~ ^[Yy] ]]; then
-        echo "Stopping containers..."
-        podman compose -f "$COMPOSE_DIR/docker-compose.yml" down
-    else
-        echo "Containers left running. Stop with:"
-        echo "  podman compose -f $COMPOSE_DIR/docker-compose.yml down"
-    fi
+    echo "Stopping containers..."
+    podman compose -f "$COMPOSE_DIR/docker-compose.yml" down 2>/dev/null || true
 }
 
 trap cleanup EXIT INT TERM
@@ -106,6 +93,11 @@ echo "  Compose dir: $COMPOSE_DIR"
 echo "  Duration:    ${DURATION_MIN} minutes"
 echo "  Bad ratio:   ${BAD_RATIO}"
 echo "  Output:      $OUTPUT_DIR"
+echo ""
+
+# --- Clean up previous run ---
+echo "=== Cleaning up previous run ==="
+podman compose -f "$COMPOSE_DIR/docker-compose.yml" down --volumes 2>/dev/null || true
 echo ""
 
 # --- Start services ---
@@ -167,23 +159,15 @@ sleep 3
 echo ""
 echo "=== Starting load generation ==="
 
-SEND_ARGS=(
-    --duration "$DURATION_MIN"
-    --bad-ratio "$BAD_RATIO"
-)
-
-if [ "$EXTRA_ARGS" = "--burst" ]; then
-    SEND_ARGS+=(--burst)
-    echo "  Mode: burst (10min send + 1min break)"
-else
-    echo "  Mode: continuous"
-fi
-
+echo "  Mode: continuous, max speed"
 echo "  Duration: ${DURATION_MIN} min"
 echo "  Bad ratio: ${BAD_RATIO}"
 echo ""
 
-python3 "$SCRIPT_DIR/send_archives.py" "${SEND_ARGS[@]}" &
+python3 "$SCRIPT_DIR/send_archives.py" \
+    --duration "$DURATION_MIN" \
+    --bad-ratio "$BAD_RATIO" \
+    --delay 0 &
 SEND_PID=$!
 echo "  Load generator PID: $SEND_PID"
 

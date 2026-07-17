@@ -11,30 +11,34 @@ circular references that the garbage collector cannot free.
 - `python3` (no pip packages needed by default)
 - The monolithic `docker-compose.yml` built and ready
 
-Start the stack before running scripts individually:
+## Quick Start
 
 ```bash
 cd monolithic
-podman compose up -d
+./scripts/reproduce_leak.sh
 ```
+
+That single command does everything: tears down any previous run, starts
+a clean compose stack, uploads bad archives at max speed for 30 minutes,
+prints CPU/memory every minute, and finishes with a start-vs-end memory report.
 
 ## Scripts
 
 ### `reproduce_leak.sh`
 
-One-command orchestrator. Starts the compose stack, waits for readiness,
-auto-detects whether the insights-core traceback fix is present, then runs
-monitoring and load generation in parallel. Prints a memory growth summary
-on exit.
+One-command orchestrator. Cleans up previous containers/volumes, starts a
+fresh compose stack, waits for readiness, auto-detects whether the
+insights-core traceback fix is present, then runs monitoring and load
+generation in parallel. Prints CPU/mem every minute during the run and a
+memory growth report on exit. Fully non-interactive.
 
 ```bash
-./scripts/reproduce_leak.sh                # 60 min, 30% bad archives
+./scripts/reproduce_leak.sh                # 30 min, 100% bad archives, max speed
 ./scripts/reproduce_leak.sh 120            # 2 hours
 ./scripts/reproduce_leak.sh 120 0.5        # 2 hours, 50% bad archives
-./scripts/reproduce_leak.sh 60 0.3 --burst # burst mode (10min send + 1min break)
 ```
 
-Press `Ctrl+C` to stop early — it still prints the summary.
+Press `Ctrl+C` to stop early — it still prints the summary and stops containers.
 
 ### `send_archives.py`
 
@@ -82,7 +86,8 @@ python3 scripts/send_archives.py --use-molodec --duration 60
 ### `monitor.sh`
 
 Collects CPU and memory stats every 10 seconds for `insights-app` and
-`insights-postgres` containers. Outputs CSV files and a summary report.
+`insights-postgres` containers. Prints a status line every minute and
+outputs CSV files plus a summary report.
 
 ```bash
 # Monitor for 60 minutes

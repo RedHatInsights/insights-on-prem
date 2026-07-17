@@ -55,7 +55,7 @@ while true; do
 
     for container in "${CONTAINERS[@]}"; do
         if ! podman ps --format '{{.Names}}' | grep -q "^${container}$"; then
-            if [ $((ITERATION % 60)) -eq 0 ]; then
+            if [ $((ITERATION % 6)) -eq 0 ]; then
                 echo "  [SKIP] $container — not running"
             fi
             continue
@@ -100,9 +100,9 @@ while true; do
                 >> "$OUTPUT_DIR/${container}_process_memory.csv"
         fi
 
-        # Periodic status line
-        if [ $((ITERATION % 60)) -eq 0 ]; then
-            echo "  [${ELAPSED_MIN}min] $container: mem=${MEM_USAGE} MiB cpu=${CPU_PERC}%"
+        # Status line every minute (~6 iterations at 10s interval)
+        if [ $((ITERATION % 6)) -eq 0 ]; then
+            printf "  [%3d min] %-20s mem=%s MiB  cpu=%s%%\n" "$ELAPSED_MIN" "$container" "$MEM_USAGE" "$CPU_PERC"
         fi
     done
 
