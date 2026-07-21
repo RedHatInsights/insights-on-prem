@@ -33,7 +33,7 @@ fi
 
 # Prompt for RH_USER if empty
 if [ -z "${RH_USER}" ]; then
-    read -p "Enter Red Hat username: " RH_USER
+    read -r -p "Enter Red Hat username: " RH_USER
     if [ -z "${RH_USER}" ]; then
         echo "Error: Red Hat username cannot be empty" >&2
         exit 1
@@ -41,7 +41,7 @@ if [ -z "${RH_USER}" ]; then
 fi
 
 # Prompt for password
-read -s -p "Enter password for ${RH_USER}: " PASSWORD
+read -rs -p "Enter password for ${RH_USER}: " PASSWORD
 echo ""
 if [ -z "${PASSWORD}" ]; then
     echo "Error: Password cannot be empty" >&2
