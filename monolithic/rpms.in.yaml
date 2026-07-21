@@ -1,0 +1,19 @@
+contentOrigin:
+  repofiles: ["./redhat.repo"]
+context:
+  image: registry.redhat.io/ubi9-minimal:latest
+packages:
+  # Required by maturin to build Rust-based Python extensions from source
+  # (pydantic-core, uvloop, watchfiles)
+  - rust
+  - cargo
+  # C compiler + headers, required to build C extensions from source
+  # (httptools and other sdists)
+  - gcc
+  - python3-devel
+  # sqlite3 CLI / headers
+  - sqlite
+  # Provides pg_config, required to build psycopg2-binary from source
+  - postgresql-devel
+arches:
+  - x86_64

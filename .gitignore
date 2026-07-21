@@ -1,2 +1,5 @@
 __pycache__/
 monolithic/deploy/02-pull-secret.yml
+
+# Transient entitled repo file used by scripts/update_rpm_lockfile.sh
+monolithic/redhat.repo
