@@ -14,6 +14,7 @@ WORKDIR /app
 # requirements-build.txt is not installed here: it only tells Hermeto/Cachi2
 # which build-backend sdists to prefetch, so `pip install -r requirements.txt`
 # below can resolve them from the offline index during a hermetic build.
+# hadolint ignore=DL3041
 RUN microdnf install --nodocs -y sqlite postgresql-devel gcc python3-devel rust cargo && \
     /opt/venv/bin/pip install --no-cache-dir -U pip setuptools wheel && \
     microdnf clean all && \
