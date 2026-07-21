@@ -12,6 +12,11 @@ alembic>=1.13.0
 # ccx-rules-ocp is already installed in the base image, so it is not listed here.
 insights-core>=3.2.26
 
+# Lock version as a workaround to PackageWithCorruptLockfileRejected: cachecontrol==0.14.4
+# pulls in uv-build as a build backend, whose sdist ships a Cargo.lock that doesn't match
+# its Cargo.toml, which Hermeto's `cargo vendor --locked` rejects (same fix as rules-containers).
+cachecontrol==0.14.3
+
 # HTTP client
 httpx>=0.25.0
 

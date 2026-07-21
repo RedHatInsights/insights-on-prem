@@ -15,8 +15,10 @@ anyio==4.14.2
     #   httpx
     #   starlette
     #   watchfiles
-cachecontrol[filecache,redis]==0.14.4
-    # via insights-core
+cachecontrol[filecache,redis]==0.14.3
+    # via
+    #   -r requirements-in.txt
+    #   insights-core
 certifi==2026.6.17
     # via
     #   httpcore
