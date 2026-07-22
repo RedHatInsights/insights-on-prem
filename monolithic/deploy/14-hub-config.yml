@@ -95,23 +95,27 @@ spec:
                     import { createServer } from "node:http";
                     import { connect } from "node:net";
                     const ALLOWED = "insights-operator-proxy.openshift-insights.svc";
+                    const ALLOWED_PORT = 8443;
                     const server = createServer((_req, res) => { res.writeHead(405); res.end(); });
                     server.on("connect", (req, cltSocket, head) => {
                       const [host, port] = req.url.split(":");
-                      if (host !== ALLOWED) {
+                      if (host !== ALLOWED || (parseInt(port) || 443) !== ALLOWED_PORT) {
                         cltSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
                         cltSocket.end();
                         return;
                       }
-                      const srv = connect(parseInt(port) || 443, host, () => {
+                      let established = false;
+                      cltSocket.on("error", () => { cltSocket.destroy(); });
+                      const srv = connect(ALLOWED_PORT, host, () => {
+                        established = true;
                         cltSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
                         srv.write(head);
                         srv.pipe(cltSocket);
                         cltSocket.pipe(srv);
                       });
                       srv.on("error", () => {
-                        cltSocket.write("HTTP/1.1 502 Bad Gateway\r\n\r\n");
-                        cltSocket.end();
+                        if (!established) cltSocket.write("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+                        cltSocket.destroy();
                       });
                     });
                     server.listen(3128, () => console.log("connect-proxy listening on :3128"));
@@ -136,7 +140,7 @@ spec:
                     spec:
                       containers:
                         - name: proxy
-                          image: registry.access.redhat.com/ubi9/nodejs-22-minimal:latest
+                          image: registry.access.redhat.com/ubi9/nodejs-22-minimal@sha256:3ad547d444d597c68235bbb0e31dce0d1c0fa3f67c5c92474b7b3a05782b5a79
                           command: ["node", "/config/proxy.mjs"]
                           ports:
                             - containerPort: 3128
@@ -144,6 +148,14 @@ spec:
                             - name: script
                               mountPath: /config
                               readOnly: true
+                          readinessProbe:
+                            tcpSocket:
+                              port: 3128
+                            initialDelaySeconds: 2
+                          livenessProbe:
+                            tcpSocket:
+                              port: 3128
+                            initialDelaySeconds: 5
                           resources:
                             requests:
                               cpu: 1m
@@ -155,6 +167,9 @@ spec:
                             capabilities:
                               drop: ["ALL"]
                             runAsNonRoot: true
+                            readOnlyRootFilesystem: true
+                            seccompProfile:
+                              type: RuntimeDefault
                       volumes:
                         - name: script
                           configMap:
