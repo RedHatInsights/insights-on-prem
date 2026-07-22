@@ -8,9 +8,11 @@ packages:
   - rust
   - cargo
   # C compiler + headers, required to build C extensions from source
-  # (httptools and other sdists)
+  # (httptools and other sdists). The base image ships python3.12 (not the
+  # RHEL9 default python3/3.9), so we need python3.12-devel to match the
+  # venv's headers, not python3-devel.
   - gcc
-  - python3-devel
+  - python3.12-devel
   # sqlite3 CLI / headers
   - sqlite
   # Provides pg_config, required to build psycopg2-binary from source
