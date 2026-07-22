@@ -8,7 +8,7 @@ circular references that the garbage collector cannot free.
 ## Prerequisites
 
 - `podman` with `podman-compose`
-- `python3` (no pip packages needed by default)
+- [`uv`](https://docs.astral.sh/uv/) for Python venv setup
 - The monolithic `docker-compose.yml` built and ready
 
 ## Quick Start
@@ -18,10 +18,10 @@ cd monolithic
 ./scripts/reproduce_leak.sh
 ```
 
-That single command does everything: tears down any previous run, starts
-a clean compose stack, uploads bad archives at max speed for 30 minutes,
-prints CPU/memory/disk every minute, and finishes with a leak evaluation
-report that excludes the initial warm-up period.
+That single command does everything: sets up a Python venv (if needed),
+tears down any previous run, starts a clean compose stack, uploads bad
+archives at max speed for 30 minutes, prints CPU/memory/disk every 30s,
+and finishes with a leak evaluation report that excludes the warm-up period.
 
 ## Scripts
 
@@ -42,6 +42,17 @@ Fully non-interactive.
 ```
 
 Press `Ctrl+C` to stop early — it still prints the summary and stops containers.
+
+### `setup_venv.sh`
+
+Creates a Python venv at `scripts/venv/` with molodec installed from the
+internal Red Hat PyPI using `uv`. Called automatically by `reproduce_leak.sh`
+if the venv doesn't exist yet.
+
+```bash
+./scripts/setup_venv.sh        # create venv
+rm -rf scripts/venv             # to recreate from scratch
+```
 
 ### `send_archives.py`
 
@@ -80,11 +91,7 @@ python3 scripts/send_archives.py --use-molodec --duration 60
   in insights-core components, exercising `broker.add_exception()` — the code
   path where the traceback circular reference leak occurs.
 - **Molodec** (`--use-molodec`) — realistic OCP archives with rule hits.
-  Requires molodec from the internal Red Hat PyPI:
-  ```bash
-  export PIP_INDEX_URL=https://repository.engineering.redhat.com/nexus/repository/insights-qe/simple
-  pip install -U molodec
-  ```
+  Already installed in the venv by `setup_venv.sh`.
 
 ### `monitor.sh`
 

@@ -12,10 +12,47 @@
 
 set -euo pipefail
 
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    cat <<'EOF'
+Usage: reproduce_leak.sh [DURATION_MIN] [BAD_RATIO] [--use-molodec]
+
+Reproduce insights-core memory leak in the monolithic deployment.
+
+  DURATION_MIN    How long to run in minutes (default: 30)
+  BAD_RATIO       Fraction of bad archives 0.0-1.0 (default: 1.0)
+  --use-molodec   Use molodec for realistic OCP archives instead of
+                  self-contained bad archives (requires venv with molodec)
+
+What it does:
+  1. Sets up a Python venv with molodec (if not present)
+  2. Tears down any existing containers and volumes
+  3. Starts a fresh podman compose stack
+  4. Checks whether the insights-core traceback fix is applied
+  5. Uploads archives at max speed while monitoring CPU/mem/disk
+  6. Prints a leak evaluation report (skips first 5 min warm-up)
+  7. Stops containers on exit
+
+Examples:
+  ./reproduce_leak.sh                    # 30 min, 100% bad archives
+  ./reproduce_leak.sh 60                 # 60 min
+  ./reproduce_leak.sh 120 0.5            # 2 hours, 50% bad archives
+  ./reproduce_leak.sh 30 0.3 --use-molodec  # molodec archives, 30% bad
+
+Press Ctrl+C to stop early — summary is still printed.
+EOF
+    exit 0
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 DURATION_MIN="${1:-30}"
 BAD_RATIO="${2:-1.0}"
+USE_MOLODEC=""
+for arg in "$@"; do
+    if [ "$arg" = "--use-molodec" ]; then
+        USE_MOLODEC="--use-molodec"
+    fi
+done
 OUTPUT_DIR="${SCRIPT_DIR}/monitoring_$(date +%Y%m%d_%H%M%S)"
 MONITOR_PID=""
 SEND_PID=""
@@ -106,8 +143,18 @@ if [ ! -f "$SCRIPT_DIR/send_archives.py" ]; then
     exit 1
 fi
 
-if ! command -v python3 &>/dev/null; then
-    echo "ERROR: python3 not found"
+# --- Set up venv if needed ---
+VENV_DIR="$SCRIPT_DIR/venv"
+if [ ! -d "$VENV_DIR" ]; then
+    echo "=== Setting up Python venv ==="
+    bash "$SCRIPT_DIR/setup_venv.sh"
+    echo ""
+fi
+
+PYTHON="$VENV_DIR/bin/python3"
+if [ ! -x "$PYTHON" ]; then
+    echo "ERROR: python3 not found at $PYTHON"
+    echo "Run: ./scripts/setup_venv.sh"
     exit 1
 fi
 
@@ -184,12 +231,16 @@ echo "=== Starting load generation ==="
 echo "  Mode: continuous, max speed"
 echo "  Duration: ${DURATION_MIN} min"
 echo "  Bad ratio: ${BAD_RATIO}"
+if [ -n "$USE_MOLODEC" ]; then
+    echo "  Archives: molodec (realistic OCP)"
+fi
 echo ""
 
-python3 "$SCRIPT_DIR/send_archives.py" \
+"$PYTHON" "$SCRIPT_DIR/send_archives.py" \
     --duration "$DURATION_MIN" \
     --bad-ratio "$BAD_RATIO" \
-    --delay 0 &
+    --delay 0 \
+    $USE_MOLODEC &
 SEND_PID=$!
 echo "  Load generator PID: $SEND_PID"
 
