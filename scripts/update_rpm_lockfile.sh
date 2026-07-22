@@ -84,7 +84,18 @@ CONTAINER_ARGS+=("-e" "PASSWORD=${PASSWORD}")
 CONTAINER_ARGS+=("registry.access.redhat.com/ubi9")
 
 # Build the bash command to run inside the container
+# `set -e` + the unregister trap matter: without them, a failure partway
+# through (e.g. rpm-lockfile-prototype erroring out) would still let the
+# script reach `rm -rf redhat.repo` and exit 0, making the outer script
+# falsely report success while leaving the old rpms.lock.yaml untouched.
+# The trap also unregisters the subscription-manager system on every exit
+# (success or failure) so repeated runs don't leak registered systems and
+# eventually exhaust the account's subscription/system-registration limit
+# (surfaces as "This system has no repositories available through
+# subscriptions." on a later run).
 BASH_CMD=$(cat <<EOF
+set -e
+trap 'subscription-manager unregister || true' EXIT
 ${SUB_MGR_CMD}
 subscription-manager refresh
 dnf install -y pip skopeo git
