@@ -36,26 +36,48 @@ cleanup() {
         wait "$MONITOR_PID" 2>/dev/null || true
     fi
 
-    # Memory report for insights-app
+    # Report for insights-app (skip first 5 min warm-up)
+    WARMUP_MIN=5
     CSV="$OUTPUT_DIR/insights-app_podman_stats.csv"
+    DISK_CSV="$OUTPUT_DIR/insights-app_disk_usage.csv"
+
     if [ -f "$CSV" ] && [ "$(wc -l < "$CSV")" -gt 1 ]; then
         echo ""
-        awk -F',' -v dur="$DURATION_MIN" '
+        awk -F',' -v warmup="$WARMUP_MIN" '
         NR>1 && $4+0>0 {
-            if(!n++) { first=$4+0; first_t=$2 }
-            last=$4+0; last_t=$2
+            if(!got_first) { first=$4+0; got_first=1 }
+            if($2+0 >= warmup && !got_steady) { steady=$4+0; steady_t=$2+0; got_steady=1 }
+            last=$4+0; last_t=$2+0
         } END {
-            if(n>0) {
-                mins = last_t - first_t
-                if(mins < 1) mins = 1
-                printf "=== Memory Report (insights-app) ===\n"
-                printf "  Start:    %.1f MiB\n", first
-                printf "  End:      %.1f MiB\n", last
-                printf "  Delta:    %+.1f MiB\n", last-first
-                printf "  Duration: %d min\n", mins
-                printf "  Rate:     %+.2f MiB/hr\n", (last-first)/(mins/60)
-            }
+            if(!got_steady) { steady=first; steady_t=0; got_steady=1 }
+            mins = last_t - steady_t
+            if(mins < 1) mins = 1
+            rate = (last - steady) / (mins / 60)
+
+            printf "=== Report (insights-app) ===\n"
+            printf "  Warm-up:  %.1f -> %.1f MiB (first %d min, excluded)\n", first, steady, warmup
+            printf "  Steady:   %.1f -> %.1f MiB  delta=%+.1f MiB  over %d min\n", steady, last, last-steady, mins
+            printf "  Rate:     %+.1f MiB/hr\n", rate
+
+            if(rate < 1)
+                printf "  Verdict:  STABLE — no leak detected\n"
+            else if(rate < 10)
+                printf "  Verdict:  POSSIBLE LEAK — moderate growth (%.1f MiB/hr)\n", rate
+            else
+                printf "  Verdict:  LEAK DETECTED — significant growth (%.1f MiB/hr)\n", rate
         }' "$CSV"
+
+        # Disk usage
+        if [ -f "$DISK_CSV" ] && [ "$(wc -l < "$DISK_CSV")" -gt 1 ]; then
+            awk -F',' 'NR>1 && $3+0>=0 {
+                n++;
+                if(n==1) first=$3+0;
+                last=$3+0;
+            } END {
+                if(n>0) printf "  Disk:     %d -> %d MB (%+d MB)\n", first, last, last-first
+            }' "$DISK_CSV"
+        fi
+
         echo ""
         echo "Full data: $OUTPUT_DIR/"
     fi

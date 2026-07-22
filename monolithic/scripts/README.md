@@ -20,7 +20,8 @@ cd monolithic
 
 That single command does everything: tears down any previous run, starts
 a clean compose stack, uploads bad archives at max speed for 30 minutes,
-prints CPU/memory every minute, and finishes with a start-vs-end memory report.
+prints CPU/memory/disk every minute, and finishes with a leak evaluation
+report that excludes the initial warm-up period.
 
 ## Scripts
 
@@ -29,8 +30,10 @@ prints CPU/memory every minute, and finishes with a start-vs-end memory report.
 One-command orchestrator. Cleans up previous containers/volumes, starts a
 fresh compose stack, waits for readiness, auto-detects whether the
 insights-core traceback fix is present, then runs monitoring and load
-generation in parallel. Prints CPU/mem every minute during the run and a
-memory growth report on exit. Fully non-interactive.
+generation in parallel. Prints CPU/mem/disk every minute during the run.
+On exit, prints a leak evaluation that skips the first 5 minutes of
+warm-up (component loading) and evaluates steady-state memory growth.
+Fully non-interactive.
 
 ```bash
 ./scripts/reproduce_leak.sh                # 30 min, 100% bad archives, max speed
@@ -99,10 +102,11 @@ bash scripts/monitor.sh 120 my_run_label
 
 **Data collected:**
 
-| Source                     | Metrics                                      |
-|----------------------------|----------------------------------------------|
-| `podman stats`             | CPU %, memory usage (MiB), memory limit, mem %|
-| `/proc/1/status` in container | VmSize, VmRSS, VmData, VmStk (KB)         |
+| Source                        | Metrics                                       |
+|-------------------------------|-----------------------------------------------|
+| `podman stats`                | CPU %, memory usage (MiB), memory limit, mem % |
+| `/proc/1/status` in container | VmSize, VmRSS, VmData, VmStk (KB)             |
+| `du -sm` in container         | Disk usage (MB) of data directories            |
 
 **Output files** (in the timestamped output directory):
 
@@ -110,26 +114,33 @@ bash scripts/monitor.sh 120 my_run_label
 monitoring_20260716_143000/
 ├── insights-app_podman_stats.csv
 ├── insights-app_process_memory.csv
+├── insights-app_disk_usage.csv
 ├── insights-postgres_podman_stats.csv
 ├── insights-postgres_process_memory.csv
+├── insights-postgres_disk_usage.csv
 └── SUMMARY.txt
 ```
 
 ## Interpreting Results
 
+The final report skips the first 5 minutes of warm-up (insights-core
+loading ~900 MiB of components) and evaluates steady-state memory growth:
+
+| Steady-state rate | Verdict                                    |
+|-------------------|--------------------------------------------|
+| < 1 MiB/hr        | `STABLE` — no leak detected               |
+| 1–10 MiB/hr       | `POSSIBLE LEAK` — moderate growth          |
+| > 10 MiB/hr       | `LEAK DETECTED` — significant growth       |
+
 **Signs of the leak:**
-- `insights-app` RSS grows continuously with no plateau
+- Steady-state RSS grows continuously with no plateau
 - Memory does not drop during burst-mode breaks
 - Growth rate scales with `--bad-ratio` (more exceptions = faster leak)
 
 **Healthy behavior (fix applied):**
-- RSS stabilizes after initial ramp-up
+- RSS stabilizes after warm-up
 - Memory drops during idle periods in burst mode
-- Growth rate near zero regardless of bad-ratio
-
-A typical leaky run shows ~5–15 MB/hr growth at `--bad-ratio 0.3` with
-`--delay 0.5`. The exact rate depends on archive content and how many
-insights-core components raise exceptions.
+- Steady-state growth rate near zero regardless of bad-ratio
 
 ## Background
 

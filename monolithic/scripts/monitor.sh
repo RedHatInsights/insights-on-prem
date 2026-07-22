@@ -2,8 +2,8 @@
 #
 # monitor.sh — Collect CPU/memory stats for insights-on-prem containers.
 #
-# Captures podman stats and /proc/1/status (VmRSS, VmSize) at regular
-# intervals. Outputs CSV files for analysis and a summary at the end.
+# Captures podman stats, /proc/1/status (VmRSS, VmSize), and disk usage
+# at regular intervals. Outputs CSV files for analysis and a summary.
 #
 # Usage:
 #   ./monitor.sh [duration_minutes] [output_dir]
@@ -33,7 +33,19 @@ for container in "${CONTAINERS[@]}"; do
 
     echo "timestamp,elapsed_min,vm_size_kb,vm_rss_kb,vm_data_kb,vm_stk_kb" \
         > "$OUTPUT_DIR/${container}_process_memory.csv"
+
+    echo "timestamp,elapsed_min,disk_mb" \
+        > "$OUTPUT_DIR/${container}_disk_usage.csv"
 done
+
+# Disk paths to measure per container (no associative array — bash 3.2 compat)
+disk_paths_for() {
+    case "$1" in
+        insights-app)      echo "/tmp/insights-uploads /app" ;;
+        insights-postgres) echo "/var/lib/postgresql/data" ;;
+        *)                 echo "" ;;
+    esac
+}
 
 START_TIME=$(date +%s)
 ITERATION=0
@@ -55,7 +67,7 @@ while true; do
 
     for container in "${CONTAINERS[@]}"; do
         if ! podman ps --format '{{.Names}}' | grep -q "^${container}$"; then
-            if [ $((ITERATION % 6)) -eq 0 ]; then
+            if [ $((ITERATION % 3)) -eq 0 ]; then
                 echo "  [SKIP] $container — not running"
             fi
             continue
@@ -100,9 +112,22 @@ while true; do
                 >> "$OUTPUT_DIR/${container}_process_memory.csv"
         fi
 
+        # Disk usage inside container
+        DISK_MB=""
+        PATHS=$(disk_paths_for "$container")
+        if [ -n "$PATHS" ]; then
+            DISK_MB=$(podman exec "$container" sh -c "du -sm $PATHS 2>/dev/null | awk '{s+=\$1} END{print s+0}'" 2>/dev/null) || true
+        fi
+        if [ -n "$DISK_MB" ]; then
+            echo "${TIMESTAMP},${ELAPSED_MIN},${DISK_MB}" \
+                >> "$OUTPUT_DIR/${container}_disk_usage.csv"
+        fi
+
         # Status line every minute (~6 iterations at 10s interval)
-        if [ $((ITERATION % 6)) -eq 0 ]; then
-            printf "  [%3d min] %-20s mem=%s MiB  cpu=%s%%\n" "$ELAPSED_MIN" "$container" "$MEM_USAGE" "$CPU_PERC"
+        if [ $((ITERATION % 3)) -eq 0 ]; then
+            DISK_DISPLAY="${DISK_MB:-?}"
+            printf "  [%3d min] %-20s mem=%s MiB  cpu=%s%%  disk=%s MB\n" \
+                "$ELAPSED_MIN" "$container" "$MEM_USAGE" "$CPU_PERC" "$DISK_DISPLAY"
         fi
     done
 
@@ -152,6 +177,18 @@ echo "Monitoring completed at $(date)"
             } END {
                 if(n>0) printf "  VmRSS:         start=%.0f KB  end=%.0f KB  delta=%+.0f KB (%+.1f MB)\n", first, last, last-first, (last-first)/1024
             }' "$PROC_CSV"
+        fi
+
+        # Disk usage
+        DISK_CSV="$OUTPUT_DIR/${container}_disk_usage.csv"
+        if [ -f "$DISK_CSV" ] && [ "$(wc -l < "$DISK_CSV")" -gt 1 ]; then
+            awk -F',' 'NR>1 && $3+0>=0 {
+                n++;
+                if(n==1) first=$3+0;
+                last=$3+0;
+            } END {
+                if(n>0) printf "  Disk:          start=%d MB  end=%d MB  delta=%+d MB\n", first, last, last-first
+            }' "$DISK_CSV"
         fi
 
         echo ""
