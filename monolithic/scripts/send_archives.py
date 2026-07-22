@@ -4,13 +4,13 @@
 Uploads archives to the monolithic FastAPI app to stress-test the
 insights-core processing pipeline (dr.run_components / broker).
 
-Default uses molodec CLI to generate realistic OCP archives.
-Falls back to self-contained generators if molodec is not available.
+Default uses self-contained archive generators. Pass --use-molodec for
+realistic OCP archives via the molodec CLI.
 
 Usage:
-    python send_archives.py --duration 60 --delay 0.5 --bad-ratio 0.3
-    python send_archives.py --duration 120 --burst
+    python send_archives.py --duration 60 --bad-ratio 0.3
     python send_archives.py --use-molodec --duration 60
+    python send_archives.py --parallel 5 --duration 30
 """
 
 import argparse
@@ -22,8 +22,10 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 
 UPLOAD_URL = "http://localhost:8000/api/ingress/v1/upload"
@@ -41,22 +43,8 @@ VERSION_JSON = json.dumps({
     },
 })
 
-TMPDIR = None
 
-
-def get_tmpdir():
-    global TMPDIR
-    if TMPDIR is None:
-        TMPDIR = tempfile.mkdtemp(prefix="send_archives_")
-    return TMPDIR
-
-
-def cleanup_tmpdir():
-    if TMPDIR and os.path.isdir(TMPDIR):
-        shutil.rmtree(TMPDIR, ignore_errors=True)
-
-
-def make_valid_archive(cluster_id):
+def make_valid_archive(cluster_id, tmpdir):
     """Create a minimal valid OCP tar archive on disk."""
     version_data = VERSION_JSON.replace("PLACEHOLDER", cluster_id)
 
@@ -103,7 +91,7 @@ def make_valid_archive(cluster_id):
         }),
     }
 
-    path = os.path.join(get_tmpdir(), f"{cluster_id}.tar")
+    path = os.path.join(tmpdir, f"{cluster_id}.tar")
     with tarfile.open(path, mode="w") as tar:
         for name, content in files.items():
             data = content.encode("utf-8")
@@ -113,7 +101,7 @@ def make_valid_archive(cluster_id):
     return path
 
 
-def make_bad_archive(cluster_id):
+def make_bad_archive(cluster_id, tmpdir):
     """Create a tar archive with corrupted JSON that triggers exceptions."""
     version_data = VERSION_JSON.replace("PLACEHOLDER", cluster_id)
 
@@ -138,7 +126,7 @@ def make_bad_archive(cluster_id):
         "config/namespaces_with_overlapping_uids.json": '[["broken',
     }
 
-    path = os.path.join(get_tmpdir(), f"{cluster_id}.tar")
+    path = os.path.join(tmpdir, f"{cluster_id}.tar")
     with tarfile.open(path, mode="w") as tar:
         for name, content in bad_files.items():
             data = content.encode("utf-8")
@@ -148,9 +136,9 @@ def make_bad_archive(cluster_id):
     return path
 
 
-def make_molodec_archive(cluster_id):
+def make_molodec_archive(cluster_id, tmpdir):
     """Create a realistic OCP archive using the molodec CLI."""
-    path = os.path.join(get_tmpdir(), f"{cluster_id}.tar")
+    path = os.path.join(tmpdir, f"{cluster_id}.tar")
     result = subprocess.run(
         ["molodec", "archive", "generate", "-c", cluster_id, path],
         capture_output=True, text=True, timeout=30,
@@ -174,68 +162,87 @@ def upload_archive(url, file_path):
 
 
 def run_continuous(args, make_archive_fn):
-    """Send archives continuously for the configured duration."""
+    """Send archives continuously with parallel workers."""
     duration_sec = args.duration * 60
+    workers = args.parallel
+
     print(f"\n{'='*60}")
-    print(f"CONTINUOUS MODE: {args.duration} min, delay={args.delay}s")
+    print(f"CONTINUOUS MODE: {args.duration} min, {workers} workers")
     print(f"Bad archive ratio: {args.bad_ratio:.0%}")
     print(f"Target: {args.url}")
     print(f"{'='*60}\n")
 
     start = time.time()
-    sent = 0
-    bad_sent = 0
+    lock = threading.Lock()
+    counters = {"sent": 0, "bad": 0}
 
-    try:
-        while (time.time() - start) < duration_sec:
-            cluster_id = str(uuid.uuid4())
-            is_bad = args.bad_ratio > 0 and random.random() < args.bad_ratio
+    def worker(worker_id):
+        tmpdir = tempfile.mkdtemp(prefix=f"send_archives_w{worker_id}_")
+        try:
+            while (time.time() - start) < duration_sec:
+                cluster_id = str(uuid.uuid4())
+                is_bad = args.bad_ratio > 0 and random.random() < args.bad_ratio
+                path = None
 
-            try:
-                if is_bad:
-                    path = make_bad_archive(cluster_id)
-                else:
-                    path = make_archive_fn(cluster_id)
-
-                status = upload_archive(args.url, path)
-            except Exception as e:
-                print(f"  Upload failed: {e}")
-                time.sleep(1)
-                continue
-            finally:
                 try:
-                    os.remove(path)
-                except OSError:
-                    pass
+                    if is_bad:
+                        path = make_bad_archive(cluster_id, tmpdir)
+                    else:
+                        path = make_archive_fn(cluster_id, tmpdir)
 
-            sent += 1
-            if is_bad:
-                bad_sent += 1
-            elapsed_min = (time.time() - start) / 60
+                    status = upload_archive(args.url, path)
+                except Exception as e:
+                    print(f"  [W{worker_id}] Upload failed: {e}")
+                    time.sleep(1)
+                    continue
+                finally:
+                    if path:
+                        try:
+                            os.remove(path)
+                        except OSError:
+                            pass
 
-            if sent % 100 == 0:
-                print(
-                    f"[{elapsed_min:.1f}min] Sent {sent} ({bad_sent} bad) "
-                    f"(Status: {status})"
-                )
+                with lock:
+                    counters["sent"] += 1
+                    if is_bad:
+                        counters["bad"] += 1
+                    total = counters["sent"]
 
-            time.sleep(args.delay)
-    finally:
-        cleanup_tmpdir()
+                if total % 100 == 0:
+                    elapsed_min = (time.time() - start) / 60
+                    with lock:
+                        bad = counters["bad"]
+                    print(
+                        f"[{elapsed_min:.1f}min] Sent {total} ({bad} bad) "
+                        f"(Status: {status})"
+                    )
+
+                time.sleep(args.delay)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(worker, i) for i in range(workers)]
+        for f in futures:
+            f.result()
 
     print(f"\n{'='*60}")
-    print(f"COMPLETE — {sent} archives ({bad_sent} bad) in {args.duration} min")
+    print(
+        f"COMPLETE — {counters['sent']} archives ({counters['bad']} bad) "
+        f"in {args.duration} min ({workers} workers)"
+    )
     print(f"{'='*60}\n")
 
 
 def run_burst(args, make_archive_fn):
-    """Send archives in burst/break cycles."""
+    """Send archives in burst/break cycles with parallel workers."""
     burst_sec = 10 * 60
     break_sec = 1 * 60
     num_cycles = max(1, int(args.duration / 11))
+    workers = args.parallel
 
     print(f"\n{'='*60}")
-    print(f"BURST MODE: {num_cycles} cycles of (10min send + 1min break)")
+    print(f"BURST MODE: {num_cycles} cycles, {workers} workers")
     print(f"Bad archive ratio: {args.bad_ratio:.0%}")
     print(f"Target: {args.url}")
     print(f"{'='*60}\n")
@@ -243,59 +250,75 @@ def run_burst(args, make_archive_fn):
     total_sent = 0
     total_bad = 0
 
-    try:
-        for cycle in range(num_cycles):
-            print(f"\n--- Cycle {cycle + 1}/{num_cycles} — SENDING ---")
-            burst_start = time.time()
-            sent = 0
-            bad_sent = 0
+    for cycle in range(num_cycles):
+        print(f"\n--- Cycle {cycle + 1}/{num_cycles} — SENDING ---")
+        burst_start = time.time()
+        lock = threading.Lock()
+        counters = {"sent": 0, "bad": 0}
 
-            while (time.time() - burst_start) < burst_sec:
-                cluster_id = str(uuid.uuid4())
-                is_bad = args.bad_ratio > 0 and random.random() < args.bad_ratio
+        def burst_worker(worker_id):
+            tmpdir = tempfile.mkdtemp(prefix=f"send_archives_w{worker_id}_")
+            try:
+                while (time.time() - burst_start) < burst_sec:
+                    cluster_id = str(uuid.uuid4())
+                    is_bad = args.bad_ratio > 0 and random.random() < args.bad_ratio
+                    path = None
 
-                try:
-                    if is_bad:
-                        path = make_bad_archive(cluster_id)
-                    else:
-                        path = make_archive_fn(cluster_id)
-
-                    status = upload_archive(args.url, path)
-                except Exception as e:
-                    print(f"  Upload failed: {e}")
-                    time.sleep(1)
-                    continue
-                finally:
                     try:
-                        os.remove(path)
-                    except OSError:
-                        pass
+                        if is_bad:
+                            path = make_bad_archive(cluster_id, tmpdir)
+                        else:
+                            path = make_archive_fn(cluster_id, tmpdir)
 
-                sent += 1
-                if is_bad:
-                    bad_sent += 1
+                        status = upload_archive(args.url, path)
+                    except Exception as e:
+                        print(f"  [W{worker_id}] Upload failed: {e}")
+                        time.sleep(1)
+                        continue
+                    finally:
+                        if path:
+                            try:
+                                os.remove(path)
+                            except OSError:
+                                pass
 
-                if sent % 100 == 0:
-                    elapsed = time.time() - burst_start
-                    print(
-                        f"  [Cycle {cycle+1}] Sent {sent} ({bad_sent} bad) "
-                        f"in {elapsed:.0f}s (Status: {status})"
-                    )
+                    with lock:
+                        counters["sent"] += 1
+                        if is_bad:
+                            counters["bad"] += 1
+                        total = counters["sent"]
 
-                time.sleep(args.delay)
+                    if total % 100 == 0:
+                        elapsed = time.time() - burst_start
+                        with lock:
+                            bad = counters["bad"]
+                        print(
+                            f"  [Cycle {cycle+1}] Sent {total} ({bad} bad) "
+                            f"in {elapsed:.0f}s (Status: {status})"
+                        )
 
-            total_sent += sent
-            total_bad += bad_sent
-            print(f"  Cycle {cycle+1} done: {sent} archives ({bad_sent} bad)")
+                    time.sleep(args.delay)
+            finally:
+                shutil.rmtree(tmpdir, ignore_errors=True)
 
-            if cycle < num_cycles - 1:
-                print(f"  BREAK — {break_sec}s (watch for memory release)")
-                time.sleep(break_sec)
-    finally:
-        cleanup_tmpdir()
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(burst_worker, i) for i in range(workers)]
+            for f in futures:
+                f.result()
+
+        total_sent += counters["sent"]
+        total_bad += counters["bad"]
+        print(f"  Cycle {cycle+1} done: {counters['sent']} archives ({counters['bad']} bad)")
+
+        if cycle < num_cycles - 1:
+            print(f"  BREAK — {break_sec}s (watch for memory release)")
+            time.sleep(break_sec)
 
     print(f"\n{'='*60}")
-    print(f"COMPLETE — {total_sent} archives ({total_bad} bad) over {num_cycles} cycles")
+    print(
+        f"COMPLETE — {total_sent} archives ({total_bad} bad) "
+        f"over {num_cycles} cycles ({workers} workers)"
+    )
     print(f"{'='*60}\n")
 
 
@@ -308,12 +331,16 @@ def main():
         help="Duration in minutes (default: 60)",
     )
     parser.add_argument(
-        "--delay", type=float, default=0.5,
-        help="Seconds between uploads (default: 0.5)",
+        "--delay", type=float, default=0,
+        help="Seconds between uploads per worker (default: 0)",
     )
     parser.add_argument(
-        "--bad-ratio", type=float, default=0.3,
-        help="Fraction of bad archives 0.0-1.0 (default: 0.3)",
+        "--bad-ratio", type=float, default=0.0,
+        help="Fraction of bad archives 0.0-1.0 (default: 0.0)",
+    )
+    parser.add_argument(
+        "--parallel", type=int, default=3,
+        help="Number of parallel upload workers (default: 3)",
     )
     parser.add_argument(
         "--url", default=UPLOAD_URL,
@@ -324,10 +351,17 @@ def main():
         help="Use burst mode (10min send + 1min break cycles)",
     )
     parser.add_argument(
-        "--use-molodec", action="store_true",
-        help="Use molodec for realistic OCP archives (requires molodec installed)",
+        "--use-molodec", action="store_true", default=True,
+        help="Use molodec for realistic OCP archives (default: on)",
+    )
+    parser.add_argument(
+        "--no-molodec", action="store_true",
+        help="Use self-contained archives instead of molodec",
     )
     args = parser.parse_args()
+
+    if args.no_molodec:
+        args.use_molodec = False
 
     if args.use_molodec:
         if shutil.which("molodec") is None:

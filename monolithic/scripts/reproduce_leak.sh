@@ -14,29 +14,28 @@ set -euo pipefail
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     cat <<'EOF'
-Usage: reproduce_leak.sh [DURATION_MIN] [BAD_RATIO] [--use-molodec]
+Usage: reproduce_leak.sh [DURATION_MIN] [BAD_RATIO] [--no-molodec]
 
 Reproduce insights-core memory leak in the monolithic deployment.
 
   DURATION_MIN    How long to run in minutes (default: 30)
-  BAD_RATIO       Fraction of bad archives 0.0-1.0 (default: 1.0)
-  --use-molodec   Use molodec for realistic OCP archives instead of
-                  self-contained bad archives (requires venv with molodec)
+  BAD_RATIO       Fraction of bad archives 0.0-1.0 (default: 0.0)
+  --no-molodec    Use self-contained archives instead of molodec
 
 What it does:
   1. Sets up a Python venv with molodec (if not present)
   2. Tears down any existing containers and volumes
   3. Starts a fresh podman compose stack
   4. Checks whether the insights-core traceback fix is applied
-  5. Uploads archives at max speed while monitoring CPU/mem/disk
+  5. Uploads molodec archives with 3 parallel workers while monitoring
   6. Prints a leak evaluation report (skips first 5 min warm-up)
   7. Stops containers on exit
 
 Examples:
-  ./reproduce_leak.sh                    # 30 min, 100% bad archives
+  ./reproduce_leak.sh                    # 30 min, molodec archives
   ./reproduce_leak.sh 60                 # 60 min
-  ./reproduce_leak.sh 120 0.5            # 2 hours, 50% bad archives
-  ./reproduce_leak.sh 30 0.3 --use-molodec  # molodec archives, 30% bad
+  ./reproduce_leak.sh 60 0.3             # 60 min, 30% bad archives
+  ./reproduce_leak.sh 30 0 --no-molodec  # self-contained archives
 
 Press Ctrl+C to stop early — summary is still printed.
 EOF
@@ -47,17 +46,17 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Parse args: strip flags first, then assign positional
-USE_MOLODEC=""
+NO_MOLODEC=""
 POSITIONAL=()
 for arg in "$@"; do
     case "$arg" in
-        --use-molodec) USE_MOLODEC="--use-molodec" ;;
-        --help|-h)     ;; # handled above
-        *)             POSITIONAL+=("$arg") ;;
+        --no-molodec) NO_MOLODEC="--no-molodec" ;;
+        --help|-h)    ;; # handled above
+        *)            POSITIONAL+=("$arg") ;;
     esac
 done
 DURATION_MIN="${POSITIONAL[0]:-30}"
-BAD_RATIO="${POSITIONAL[1]:-1.0}"
+BAD_RATIO="${POSITIONAL[1]:-0.0}"
 OUTPUT_DIR="${SCRIPT_DIR}/monitoring_$(date +%Y%m%d_%H%M%S)"
 MONITOR_PID=""
 SEND_PID=""
@@ -233,10 +232,12 @@ sleep 3
 echo ""
 echo "=== Starting load generation ==="
 
-echo "  Mode: continuous, max speed"
+echo "  Mode: continuous, 3 parallel workers"
 echo "  Duration: ${DURATION_MIN} min"
 echo "  Bad ratio: ${BAD_RATIO}"
-if [ -n "$USE_MOLODEC" ]; then
+if [ -n "$NO_MOLODEC" ]; then
+    echo "  Archives: self-contained"
+else
     echo "  Archives: molodec (realistic OCP)"
 fi
 echo ""
@@ -244,8 +245,7 @@ echo ""
 "$PYTHON" "$SCRIPT_DIR/send_archives.py" \
     --duration "$DURATION_MIN" \
     --bad-ratio "$BAD_RATIO" \
-    --delay 0 \
-    $USE_MOLODEC &
+    $NO_MOLODEC &
 SEND_PID=$!
 echo "  Load generator PID: $SEND_PID"
 

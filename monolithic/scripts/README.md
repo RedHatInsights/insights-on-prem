@@ -83,11 +83,13 @@ python3 scripts/send_archives.py --use-molodec --duration 60
 | Flag             | Default  | Description                                          |
 |------------------|----------|------------------------------------------------------|
 | `--duration`     | `60`     | Duration in minutes                                  |
-| `--delay`        | `0.5`    | Seconds between uploads                              |
-| `--bad-ratio`    | `0.3`    | Fraction of archives with corrupted JSON (0.0–1.0)   |
+| `--delay`        | `0`      | Seconds between uploads per worker                   |
+| `--parallel`     | `3`      | Number of parallel upload workers                    |
+| `--bad-ratio`    | `0`      | Fraction of archives with corrupted JSON (0.0–1.0)   |
 | `--url`          | `http://localhost:8000/api/ingress/v1/upload` | Upload endpoint |
 | `--burst`        | off      | Burst mode: 10 min send + 1 min break cycles         |
-| `--use-molodec`  | off      | Use molodec for archive generation (see below)        |
+| `--use-molodec`  | on       | Use molodec for archive generation (default)          |
+| `--no-molodec`   | off      | Use self-contained archives instead of molodec        |
 
 **Archive types:**
 
