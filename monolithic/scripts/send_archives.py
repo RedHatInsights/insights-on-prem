@@ -4,8 +4,8 @@
 Uploads archives to the monolithic FastAPI app to stress-test the
 insights-core processing pipeline (dr.run_components / broker).
 
-Default mode uses self-contained archive generators (no external deps).
-Pass --use-molodec to use molodec for realistic OCP archives.
+Default uses molodec CLI to generate realistic OCP archives.
+Falls back to self-contained generators if molodec is not available.
 
 Usage:
     python send_archives.py --duration 60 --delay 0.5 --bad-ratio 0.3
@@ -15,14 +15,16 @@ Usage:
 
 import argparse
 import json
+import os
 import random
+import shutil
+import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 import uuid
 from io import BytesIO
-from urllib.error import URLError
-from urllib.request import Request, urlopen
 
 UPLOAD_URL = "http://localhost:8000/api/ingress/v1/upload"
 
@@ -39,9 +41,23 @@ VERSION_JSON = json.dumps({
     },
 })
 
+TMPDIR = None
+
+
+def get_tmpdir():
+    global TMPDIR
+    if TMPDIR is None:
+        TMPDIR = tempfile.mkdtemp(prefix="send_archives_")
+    return TMPDIR
+
+
+def cleanup_tmpdir():
+    if TMPDIR and os.path.isdir(TMPDIR):
+        shutil.rmtree(TMPDIR, ignore_errors=True)
+
 
 def make_valid_archive(cluster_id):
-    """Create a minimal valid OCP archive that insights-core can process."""
+    """Create a minimal valid OCP tar archive on disk."""
     version_data = VERSION_JSON.replace("PLACEHOLDER", cluster_id)
 
     files = {
@@ -81,102 +97,80 @@ def make_valid_archive(cluster_id):
                 "labels": {"node-role.kubernetes.io/worker": ""},
             },
             "status": {
-                "conditions": [
-                    {"type": "Ready", "status": "True"},
-                ],
+                "conditions": [{"type": "Ready", "status": "True"}],
                 "capacity": {"cpu": "4", "memory": "16Gi"},
             },
         }),
     }
 
-    tario = BytesIO()
-    with tarfile.open(fileobj=tario, mode="w") as tar:
+    path = os.path.join(get_tmpdir(), f"{cluster_id}.tar")
+    with tarfile.open(path, mode="w") as tar:
         for name, content in files.items():
             data = content.encode("utf-8")
             info = tarfile.TarInfo(name=name)
             info.size = len(data)
             tar.addfile(info, BytesIO(data))
-    tario.seek(0)
-    return tario
+    return path
 
 
 def make_bad_archive(cluster_id):
-    """Create a tar archive with corrupted JSON that triggers exceptions.
-
-    Exercises the broker.add_exception() code path where the traceback
-    circular reference leak occurs.
-    """
+    """Create a tar archive with corrupted JSON that triggers exceptions."""
     version_data = VERSION_JSON.replace("PLACEHOLDER", cluster_id)
 
-    tario = BytesIO()
-    with tarfile.open(fileobj=tario, mode="w") as tar:
-        files = {
-            "config/id": cluster_id,
-            "config/version": version_data,
-            "config/infrastructure": '{"metadata":{"name":"cluster"},"status":{"broken',
-            "config/node/bad-node-1": '{"apiVersion":"v1","kind":"Node","metadata":',
-            "config/node/bad-node-2": '{truncated',
-            "config/clusteroperator/bad-co-1": '{"apiVersion":"config.openshift.io/v1"',
-            "config/pod/bad-ns/bad-pod-1": '{"kind":"Pod","broken',
-            "config/machineconfigpools/bad-mcp": '{"apiVersion":"machineconfiguration',
-            "config/machines/openshift-machine-api/bad-m1": '{"corrupted',
-            "config/image.json": '{not valid json at all',
-            "config/network": '{"metadata":{"name":"cluster"},"spec":',
-            "config/olm_operators.json": '[{"name":',
-            "config/metrics": 'not_prometheus_format{broken',
-            "config/install_plans": '{"items":[{"broken',
-            "config/persistentvolumes/bad-pv": '{"metadata":{"name":',
-            "config/certificatesigningrequests/bad-csr": '{"TypeMeta',
-            "config/cost_management_metrics_configs/bad.json": '{"apiVersion":',
-            "config/namespaces_with_overlapping_uids.json": '[["broken',
-        }
-        for name, content in files.items():
+    bad_files = {
+        "config/id": cluster_id,
+        "config/version": version_data,
+        "config/infrastructure": '{"metadata":{"name":"cluster"},"status":{"broken',
+        "config/node/bad-node-1": '{"apiVersion":"v1","kind":"Node","metadata":',
+        "config/node/bad-node-2": '{truncated',
+        "config/clusteroperator/bad-co-1": '{"apiVersion":"config.openshift.io/v1"',
+        "config/pod/bad-ns/bad-pod-1": '{"kind":"Pod","broken',
+        "config/machineconfigpools/bad-mcp": '{"apiVersion":"machineconfiguration',
+        "config/machines/openshift-machine-api/bad-m1": '{"corrupted',
+        "config/image.json": '{not valid json at all',
+        "config/network": '{"metadata":{"name":"cluster"},"spec":',
+        "config/olm_operators.json": '[{"name":',
+        "config/metrics": 'not_prometheus_format{broken',
+        "config/install_plans": '{"items":[{"broken',
+        "config/persistentvolumes/bad-pv": '{"metadata":{"name":',
+        "config/certificatesigningrequests/bad-csr": '{"TypeMeta',
+        "config/cost_management_metrics_configs/bad.json": '{"apiVersion":',
+        "config/namespaces_with_overlapping_uids.json": '[["broken',
+    }
+
+    path = os.path.join(get_tmpdir(), f"{cluster_id}.tar")
+    with tarfile.open(path, mode="w") as tar:
+        for name, content in bad_files.items():
             data = content.encode("utf-8")
             info = tarfile.TarInfo(name=name)
             info.size = len(data)
             tar.addfile(info, BytesIO(data))
-    tario.seek(0)
-    return tario
+    return path
 
 
 def make_molodec_archive(cluster_id):
-    """Create a realistic OCP archive using molodec."""
-    from molodec.archive_producer import ArchiveProducer
-    from molodec.renderer import Renderer
-    from molodec.rules import RuleSet
-
-    producer = ArchiveProducer(Renderer(*RuleSet("io").get_default_rules()))
-    return producer.make_tar_io(cluster_id)
-
-
-def upload_archive(url, tario, filename="archive.tar"):
-    """Upload archive via multipart POST, using only stdlib."""
-    boundary = f"----PythonBoundary{uuid.uuid4().hex}"
-    body = BytesIO()
-
-    body.write(f"--{boundary}\r\n".encode())
-    body.write(
-        f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
-        .encode()
+    """Create a realistic OCP archive using the molodec CLI."""
+    path = os.path.join(get_tmpdir(), f"{cluster_id}.tar")
+    result = subprocess.run(
+        ["molodec", "archive", "generate", "-c", cluster_id, path],
+        capture_output=True, text=True, timeout=30,
     )
-    body.write(b"Content-Type: application/octet-stream\r\n\r\n")
-    body.write(tario.read())
-    body.write(f"\r\n--{boundary}--\r\n".encode())
+    if result.returncode != 0:
+        raise RuntimeError(f"molodec failed: {result.stderr}")
+    return path
 
-    data = body.getvalue()
-    req = Request(
-        url,
-        data=data,
-        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
-        method="POST",
+
+def upload_archive(url, file_path):
+    """Upload archive file via curl (reliable multipart)."""
+    result = subprocess.run(
+        [
+            "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+            "-X", "POST", url,
+            "-F", f"file=@{file_path}",
+        ],
+        capture_output=True, text=True, timeout=30,
     )
-    try:
-        resp = urlopen(req, timeout=30)
-        return resp.status
-    except URLError as e:
-        if hasattr(e, "code"):
-            return e.code
-        raise
+    return int(result.stdout.strip())
 
 
 def run_continuous(args, make_archive_fn):
@@ -192,34 +186,42 @@ def run_continuous(args, make_archive_fn):
     sent = 0
     bad_sent = 0
 
-    while (time.time() - start) < duration_sec:
-        cluster_id = str(uuid.uuid4())
-        is_bad = args.bad_ratio > 0 and random.random() < args.bad_ratio
+    try:
+        while (time.time() - start) < duration_sec:
+            cluster_id = str(uuid.uuid4())
+            is_bad = args.bad_ratio > 0 and random.random() < args.bad_ratio
 
-        if is_bad:
-            tario = make_bad_archive(cluster_id)
-        else:
-            tario = make_archive_fn(cluster_id)
+            try:
+                if is_bad:
+                    path = make_bad_archive(cluster_id)
+                else:
+                    path = make_archive_fn(cluster_id)
 
-        try:
-            status = upload_archive(args.url, tario)
-        except Exception as e:
-            print(f"  Upload failed: {e}")
-            time.sleep(1)
-            continue
+                status = upload_archive(args.url, path)
+            except Exception as e:
+                print(f"  Upload failed: {e}")
+                time.sleep(1)
+                continue
+            finally:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
 
-        sent += 1
-        if is_bad:
-            bad_sent += 1
-        elapsed_min = (time.time() - start) / 60
+            sent += 1
+            if is_bad:
+                bad_sent += 1
+            elapsed_min = (time.time() - start) / 60
 
-        if sent % 100 == 0:
-            print(
-                f"[{elapsed_min:.1f}min] Sent {sent} ({bad_sent} bad) "
-                f"(Status: {status})"
-            )
+            if sent % 100 == 0:
+                print(
+                    f"[{elapsed_min:.1f}min] Sent {sent} ({bad_sent} bad) "
+                    f"(Status: {status})"
+                )
 
-        time.sleep(args.delay)
+            time.sleep(args.delay)
+    finally:
+        cleanup_tmpdir()
 
     print(f"\n{'='*60}")
     print(f"COMPLETE — {sent} archives ({bad_sent} bad) in {args.duration} min")
@@ -241,48 +243,56 @@ def run_burst(args, make_archive_fn):
     total_sent = 0
     total_bad = 0
 
-    for cycle in range(num_cycles):
-        print(f"\n--- Cycle {cycle + 1}/{num_cycles} — SENDING ---")
-        burst_start = time.time()
-        sent = 0
-        bad_sent = 0
+    try:
+        for cycle in range(num_cycles):
+            print(f"\n--- Cycle {cycle + 1}/{num_cycles} — SENDING ---")
+            burst_start = time.time()
+            sent = 0
+            bad_sent = 0
 
-        while (time.time() - burst_start) < burst_sec:
-            cluster_id = str(uuid.uuid4())
-            is_bad = args.bad_ratio > 0 and random.random() < args.bad_ratio
+            while (time.time() - burst_start) < burst_sec:
+                cluster_id = str(uuid.uuid4())
+                is_bad = args.bad_ratio > 0 and random.random() < args.bad_ratio
 
-            if is_bad:
-                tario = make_bad_archive(cluster_id)
-            else:
-                tario = make_archive_fn(cluster_id)
+                try:
+                    if is_bad:
+                        path = make_bad_archive(cluster_id)
+                    else:
+                        path = make_archive_fn(cluster_id)
 
-            try:
-                status = upload_archive(args.url, tario)
-            except Exception as e:
-                print(f"  Upload failed: {e}")
-                time.sleep(1)
-                continue
+                    status = upload_archive(args.url, path)
+                except Exception as e:
+                    print(f"  Upload failed: {e}")
+                    time.sleep(1)
+                    continue
+                finally:
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
 
-            sent += 1
-            if is_bad:
-                bad_sent += 1
+                sent += 1
+                if is_bad:
+                    bad_sent += 1
 
-            if sent % 100 == 0:
-                elapsed = time.time() - burst_start
-                print(
-                    f"  [Cycle {cycle+1}] Sent {sent} ({bad_sent} bad) "
-                    f"in {elapsed:.0f}s (Status: {status})"
-                )
+                if sent % 100 == 0:
+                    elapsed = time.time() - burst_start
+                    print(
+                        f"  [Cycle {cycle+1}] Sent {sent} ({bad_sent} bad) "
+                        f"in {elapsed:.0f}s (Status: {status})"
+                    )
 
-            time.sleep(args.delay)
+                time.sleep(args.delay)
 
-        total_sent += sent
-        total_bad += bad_sent
-        print(f"  Cycle {cycle+1} done: {sent} archives ({bad_sent} bad)")
+            total_sent += sent
+            total_bad += bad_sent
+            print(f"  Cycle {cycle+1} done: {sent} archives ({bad_sent} bad)")
 
-        if cycle < num_cycles - 1:
-            print(f"  BREAK — {break_sec}s (watch for memory release)")
-            time.sleep(break_sec)
+            if cycle < num_cycles - 1:
+                print(f"  BREAK — {break_sec}s (watch for memory release)")
+                time.sleep(break_sec)
+    finally:
+        cleanup_tmpdir()
 
     print(f"\n{'='*60}")
     print(f"COMPLETE — {total_sent} archives ({total_bad} bad) over {num_cycles} cycles")
@@ -320,16 +330,10 @@ def main():
     args = parser.parse_args()
 
     if args.use_molodec:
-        try:
-            from molodec.archive_producer import ArchiveProducer  # noqa: F401
-        except ImportError:
+        if shutil.which("molodec") is None:
             print(
-                "ERROR: --use-molodec requires molodec to be installed.\n"
-                "Install with:\n"
-                "  export PIP_INDEX_URL="
-                "https://repository.engineering.redhat.com/nexus/repository/"
-                "insights-qe/simple\n"
-                "  pip install -U molodec",
+                "ERROR: --use-molodec requires molodec CLI.\n"
+                "Run: ./scripts/setup_venv.sh",
                 file=sys.stderr,
             )
             sys.exit(1)

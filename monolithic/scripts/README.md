@@ -43,6 +43,12 @@ Fully non-interactive.
 
 Press `Ctrl+C` to stop early — it still prints the summary and stops containers.
 
+To watch live app logs in another terminal while the reproducer runs:
+
+```bash
+podman logs -f insights-app
+```
+
 ### `setup_venv.sh`
 
 Creates a Python venv at `scripts/venv/` with molodec installed from the
