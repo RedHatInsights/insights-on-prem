@@ -67,8 +67,133 @@ spec:
                           configMap:
                             name: insights-on-prem-proxy-ca
 
+    # --- CONNECT proxy for console upgrade-risks requests ---
+    # The console's getDefaultAgent() sets an explicit `ca` that excludes
+    # NODE_EXTRA_CA_CERTS (see docs/console-ca-issue.md).  When HTTPS_PROXY
+    # is set, the code uses HttpsProxyAgent instead, which has no explicit
+    # `ca` and therefore honours NODE_EXTRA_CA_CERTS for the target TLS
+    # handshake.  The proxy is restricted to the insights-operator-proxy
+    # host and is only reachable inside the cluster (ClusterIP).
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: insights-on-prem-connect-proxy
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: ConfigMap
+                metadata:
+                  name: insights-on-prem-connect-proxy
+                  namespace: open-cluster-management
+                data:
+                  proxy.mjs: |
+                    import { createServer } from "node:http";
+                    import { connect } from "node:net";
+                    const ALLOWED = "insights-operator-proxy.openshift-insights.svc";
+                    const ALLOWED_PORT = 8443;
+                    const server = createServer((_req, res) => { res.writeHead(405); res.end(); });
+                    server.on("connect", (req, cltSocket, head) => {
+                      const [host, port] = req.url.split(":");
+                      if (host !== ALLOWED || (parseInt(port) || 443) !== ALLOWED_PORT) {
+                        cltSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+                        cltSocket.end();
+                        return;
+                      }
+                      let established = false;
+                      cltSocket.on("error", () => { cltSocket.destroy(); });
+                      const srv = connect(ALLOWED_PORT, host, () => {
+                        established = true;
+                        cltSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+                        srv.write(head);
+                        srv.pipe(cltSocket);
+                        cltSocket.pipe(srv);
+                      });
+                      srv.on("error", () => {
+                        if (!established) cltSocket.write("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+                        cltSocket.destroy();
+                      });
+                    });
+                    server.listen(3128, () => console.log("connect-proxy listening on :3128"));
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: apps/v1
+                kind: Deployment
+                metadata:
+                  name: insights-on-prem-connect-proxy
+                  namespace: open-cluster-management
+                  labels:
+                    app: insights-on-prem-connect-proxy
+                spec:
+                  replicas: 1
+                  selector:
+                    matchLabels:
+                      app: insights-on-prem-connect-proxy
+                  template:
+                    metadata:
+                      labels:
+                        app: insights-on-prem-connect-proxy
+                    spec:
+                      containers:
+                        - name: proxy
+                          image: registry.access.redhat.com/ubi9/nodejs-22-minimal@sha256:3ad547d444d597c68235bbb0e31dce0d1c0fa3f67c5c92474b7b3a05782b5a79
+                          command: ["node", "/config/proxy.mjs"]
+                          ports:
+                            - containerPort: 3128
+                          volumeMounts:
+                            - name: script
+                              mountPath: /config
+                              readOnly: true
+                          readinessProbe:
+                            tcpSocket:
+                              port: 3128
+                            initialDelaySeconds: 2
+                          livenessProbe:
+                            tcpSocket:
+                              port: 3128
+                            initialDelaySeconds: 5
+                          resources:
+                            requests:
+                              cpu: 1m
+                              memory: 16Mi
+                            limits:
+                              memory: 32Mi
+                          securityContext:
+                            allowPrivilegeEscalation: false
+                            capabilities:
+                              drop: ["ALL"]
+                            runAsNonRoot: true
+                            readOnlyRootFilesystem: true
+                            seccompProfile:
+                              type: RuntimeDefault
+                      volumes:
+                        - name: script
+                          configMap:
+                            name: insights-on-prem-connect-proxy
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Service
+                metadata:
+                  name: insights-on-prem-connect-proxy
+                  namespace: open-cluster-management
+                  labels:
+                    app: insights-on-prem-connect-proxy
+                spec:
+                  selector:
+                    app: insights-on-prem-connect-proxy
+                  ports:
+                    - port: 3128
+                      targetPort: 3128
+
     # --- Configure ACM console for URP ---
     # Point upgrade risk predictions to the on-prem service via the spoke proxy.
+    # HTTPS_PROXY makes the upgrade-risks code path use HttpsProxyAgent
+    # (which honours NODE_EXTRA_CA_CERTS) instead of getDefaultAgent().
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
@@ -95,6 +220,8 @@ spec:
                               value: "https://insights-operator-proxy.openshift-insights.svc:8443/api/insights-results-aggregator/v2/upgrade-risks-prediction"
                             - name: NODE_EXTRA_CA_CERTS
                               value: "/service-ca/service-ca.crt"
+                            - name: HTTPS_PROXY
+                              value: "http://insights-on-prem-connect-proxy.open-cluster-management.svc:3128"
                           volumeMounts:
                             - name: service-ca
                               mountPath: /service-ca
