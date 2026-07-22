@@ -195,6 +195,7 @@ setuptools==83.0.0 \
     #   certifi
     #   charset-normalizer
     #   coverage
+    #   greenlet
     #   iniconfig
     #   mako
     #   markupsafe

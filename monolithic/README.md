@@ -52,6 +52,21 @@ GET /health
 
 The monolithic Dockerfile is built hermetically by Konflux (network access disabled during the build), using [Hermeto](https://hermetoproject.github.io/hermeto/) to prefetch pip and RPM dependencies beforehand. See `requirements-in.txt` (source for `pip-compile`), `requirements.txt`/`requirements-build.txt` (pinned lockfiles), and `rpms.in.yaml`/`rpms.lock.yaml` (RPM lockfile, regenerated via `../scripts/update_rpm_lockfile.sh`).
 
+### Regenerating requirements.txt / requirements-build.txt
+
+To add or upgrade a Python dependency, edit `requirements-in.txt`, then regenerate the pinned files. **Always do this inside a `linux/amd64` Python 3.12 container** (matching the base image and Konflux's build platform) — running `pip-compile` on macOS/arm64 silently drops dependencies whose markers only match `x86_64`/`aarch64` (e.g. SQLAlchemy's `greenlet`), since pip-compile resolves environment markers against the machine it runs on, not the target platform:
+
+```bash
+cd monolithic
+podman run --rm --platform linux/amd64 -v "$(pwd):/work:Z" -w /work python:3.12-slim bash -c '
+  pip install -q pip-tools pybuild-deps
+  pip-compile --output-file=requirements.txt requirements-in.txt
+  pybuild-deps compile --generate-hashes --output-file=requirements-build.txt requirements.txt
+'
+```
+
+`requirements.txt` is the fully-pinned runtime lockfile; `requirements-build.txt` lists the build-backend sdists (e.g. `setuptools`, `cython`, `maturin`) Hermeto needs to prefetch so packages without prebuilt wheels can be built from source in the hermetic build.
+
 Some RPMs (e.g. `postgresql-devel`) are only available on the entitled RHEL CDN, not the public UBI repos. Konflux's `prefetch-dependencies` task needs an `activation-key` secret in the `obsint-processing-tenant` namespace to authenticate to that CDN — without it, prefetching fails with a misleading `SSLCertVerificationError: self-signed certificate in certificate chain`. This secret is namespace-scoped (shared with `rules-containers`), see the value in Bitwarden, so it only needs to be created once per tenant:
 
 ```bash

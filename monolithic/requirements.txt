@@ -36,6 +36,8 @@ fastapi==0.139.2
     # via -r requirements-in.txt
 filelock==3.31.2
     # via cachecontrol
+greenlet==3.5.3
+    # via sqlalchemy
 h11==0.16.0
     # via
     #   httpcore
