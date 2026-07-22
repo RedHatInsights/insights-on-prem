@@ -132,7 +132,7 @@ oc get pods -n insights-on-prem-poc
 oc get policy -n insights-on-prem-poc
 
 # Verify insights-client configuration
-oc get deployment insights-client -n open-cluster-management -o yaml | grep -A2 'name: CCX_SERVER'
+oc get configmap client-config -n open-cluster-management -o yaml
 
 # Check logs
 oc logs -f deployment/insights-on-prem -n insights-on-prem-poc
@@ -140,7 +140,7 @@ oc logs -f deployment/insights-on-prem -n insights-on-prem-poc
 
 ### Important Notes
 
-- **MultiClusterHub operator is paused** after deployment by the `insights-on-prem-hub-config` Policy. The Policy continuously enforces this — to permanently unpause MCH, delete or disable the Policy first.
+- **insights-client** is configured via a `client-config` ConfigMap enforced by the `insights-on-prem-hub-config` Policy. The **ACM console** URP endpoint is configured via MCH `spec.overrides` — both use the service-serving CA already present in every pod at `/var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt`, so no custom volume mounts are needed.
 
 ## On-Demand Data Gathering
 
@@ -265,7 +265,7 @@ The Insights section of that page has four panels. Here is what backs each one a
 
 ### Update risk predictions
 
-**Source:** The ACM console backend forwards URP calls to `console.redhat.com`. The URL is configurable via the `UPGRADE_RISKS_PREDICTION_URL` env var ([CCXDEV-16237](https://redhat.atlassian.net/browse/CCXDEV-16237), [merged](https://github.com/stolostron/console/pull/5892)). `deploy/14-hub-config.yml` sets this env var to point to the on-prem service via the spoke proxy.
+**Source:** The ACM console backend forwards URP calls to `console.redhat.com`. The URL is configurable via the `UPGRADE_RISKS_PREDICTION_URL` env var ([CCXDEV-16237](https://redhat.atlassian.net/browse/CCXDEV-16237), [merged](https://github.com/stolostron/console/pull/5892)). `deploy/14-hub-config.yml` sets this env var via MCH `spec.overrides` to point to the on-prem service via the spoke proxy.
 
 ### Alerts
 

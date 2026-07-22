@@ -7,13 +7,12 @@ spec:
   remediationAction: enforce
   disabled: false
   policy-templates:
-    # --- Pause MCH operator ---
-    # Prevents MCH from reverting our changes to insights-client and console.
+    # --- Configure insights-client and console via MCH overrides ---
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
         metadata:
-          name: insights-on-prem-mch-pause
+          name: insights-on-prem-mch-overrides
         spec:
           remediationAction: enforce
           severity: medium
@@ -25,47 +24,35 @@ spec:
                 metadata:
                   name: multiclusterhub
                   namespace: open-cluster-management
-                  annotations:
-                    mch-pause: "true"
-
-    # --- Configure insights-client ---
-    # Route insights-client through the spoke proxy instead of console.redhat.com.
-    - objectDefinition:
-        apiVersion: policy.open-cluster-management.io/v1
-        kind: ConfigurationPolicy
-        metadata:
-          name: insights-on-prem-insights-client
-        spec:
-          remediationAction: enforce
-          severity: medium
-          object-templates:
-            - complianceType: musthave
-              objectDefinition:
-                apiVersion: apps/v1
-                kind: Deployment
-                metadata:
-                  name: insights-client
-                  namespace: open-cluster-management
                 spec:
-                  template:
-                    spec:
-                      containers:
-                        - name: client
-                          env:
-                            - name: CCX_SERVER
-                              value: "https://insights-operator-proxy.openshift-insights.svc.cluster.local:8443/api/v2"
-                            - name: SSL_CERT_DIR
-                              value: "/service-ca"
-                            - name: POLL_INTERVAL
-                              value: "1"
-                          volumeMounts:
-                            - name: service-ca
-                              mountPath: /service-ca
-                              readOnly: true
-                      volumes:
-                        - name: service-ca
-                          configMap:
-                            name: insights-on-prem-proxy-ca
+                  overrides:
+                    components:
+                      - name: insights
+                        enabled: true
+                        configOverrides:
+                          deployments:
+                            - name: insights-client
+                              containers:
+                                - name: client
+                                  env:
+                                    - name: CCX_SERVER
+                                      value: "https://insights-operator-proxy.openshift-insights.svc.cluster.local:8443/api/v2"
+                                    - name: SSL_CERT_DIR
+                                      value: "/var/run/secrets/kubernetes.io/serviceaccount"
+                                    - name: POLL_INTERVAL
+                                      value: "1"
+                      - name: console
+                        enabled: true
+                        configOverrides:
+                          deployments:
+                            - name: console-chart-console-v2
+                              containers:
+                                - name: console
+                                  env:
+                                    - name: NODE_EXTRA_CA_CERTS
+                                      value: "/var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt"
+                                    - name: HTTPS_PROXY
+                                      value: "http://insights-on-prem-connect-proxy.open-cluster-management.svc:3128"
 
     # --- CONNECT proxy for console upgrade-risks requests ---
     # The console's getDefaultAgent() sets an explicit `ca` that excludes
@@ -190,10 +177,11 @@ spec:
                     - port: 3128
                       targetPort: 3128
 
-    # --- Configure ACM console for URP ---
-    # Point upgrade risk predictions to the on-prem service via the spoke proxy.
-    # HTTPS_PROXY makes the upgrade-risks code path use HttpsProxyAgent
-    # (which honours NODE_EXTRA_CA_CERTS) instead of getDefaultAgent().
+    # --- Console URP setting ---
+    # The console backend reads settings from files in the console-config
+    # ConfigMap (mounted at /app/config). Its config loader deletes any
+    # UPGRADE_RISKS_PREDICTION_URL env var that lacks a matching file,
+    # so the URL must be provided here rather than as an env var.
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
@@ -205,31 +193,13 @@ spec:
           object-templates:
             - complianceType: musthave
               objectDefinition:
-                apiVersion: apps/v1
-                kind: Deployment
+                apiVersion: v1
+                kind: ConfigMap
                 metadata:
-                  name: console-chart-console-v2
+                  name: console-config
                   namespace: open-cluster-management
-                spec:
-                  template:
-                    spec:
-                      containers:
-                        - name: console
-                          env:
-                            - name: UPGRADE_RISKS_PREDICTION_URL
-                              value: "https://insights-operator-proxy.openshift-insights.svc:8443/api/insights-results-aggregator/v2/upgrade-risks-prediction"
-                            - name: NODE_EXTRA_CA_CERTS
-                              value: "/service-ca/service-ca.crt"
-                            - name: HTTPS_PROXY
-                              value: "http://insights-on-prem-connect-proxy.open-cluster-management.svc:3128"
-                          volumeMounts:
-                            - name: service-ca
-                              mountPath: /service-ca
-                              readOnly: true
-                      volumes:
-                        - name: service-ca
-                          configMap:
-                            name: insights-on-prem-proxy-ca
+                data:
+                  UPGRADE_RISKS_PREDICTION_URL: 'https://insights-operator-proxy.openshift-insights.svc:8443/api/insights-results-aggregator/v2/upgrade-risks-prediction'
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding
