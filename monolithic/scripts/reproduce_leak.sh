@@ -45,14 +45,19 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-DURATION_MIN="${1:-30}"
-BAD_RATIO="${2:-1.0}"
+
+# Parse args: strip flags first, then assign positional
 USE_MOLODEC=""
+POSITIONAL=()
 for arg in "$@"; do
-    if [ "$arg" = "--use-molodec" ]; then
-        USE_MOLODEC="--use-molodec"
-    fi
+    case "$arg" in
+        --use-molodec) USE_MOLODEC="--use-molodec" ;;
+        --help|-h)     ;; # handled above
+        *)             POSITIONAL+=("$arg") ;;
+    esac
 done
+DURATION_MIN="${POSITIONAL[0]:-30}"
+BAD_RATIO="${POSITIONAL[1]:-1.0}"
 OUTPUT_DIR="${SCRIPT_DIR}/monitoring_$(date +%Y%m%d_%H%M%S)"
 MONITOR_PID=""
 SEND_PID=""
