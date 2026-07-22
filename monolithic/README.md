@@ -48,6 +48,18 @@ GET /health
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
 
+## Hermetic Builds
+
+The monolithic Dockerfile is built hermetically by Konflux (network access disabled during the build), using [Hermeto](https://hermetoproject.github.io/hermeto/) to prefetch pip and RPM dependencies beforehand. See `requirements-in.txt` (source for `pip-compile`), `requirements.txt`/`requirements-build.txt` (pinned lockfiles), and `rpms.in.yaml`/`rpms.lock.yaml` (RPM lockfile, regenerated via `../scripts/update_rpm_lockfile.sh`).
+
+Some RPMs (e.g. `postgresql-devel`) are only available on the entitled RHEL CDN, not the public UBI repos. Konflux's `prefetch-dependencies` task needs an `activation-key` secret in the `obsint-processing-tenant` namespace to authenticate to that CDN — without it, prefetching fails with a misleading `SSLCertVerificationError: self-signed certificate in certificate chain`. This secret is namespace-scoped (shared with `rules-containers`), see the value in Bitwarden, so it only needs to be created once per tenant:
+
+```bash
+oc create -f <path-to>/activation-key-secret.yaml
+```
+
+You may need to follow https://konflux.pages.redhat.com/docs/users/building/activation-keys-subscription.html#Create-custom-activation-key-secret to troubleshoot any issues.
+
 ## Building and Pushing Multiarch Image
 
 Build and push a multiarch (amd64, arm64) image to Quay (this step is necessary because cluster nodes may run on different architecture than the development environment):
