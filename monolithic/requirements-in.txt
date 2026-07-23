@@ -10,7 +10,7 @@ alembic>=1.13.0
 
 # Insights-core and CCX packages
 # ccx-rules-ocp is already installed in the base image, so it is not listed here.
-insights-core>=3.2.26
+# insights-core>=3.2.26
 
 # Lock version as a workaround to PackageWithCorruptLockfileRejected: cachecontrol==0.14.4
 # pulls in uv-build as a build backend, whose sdist ships a Cargo.lock that doesn't match
