@@ -14,28 +14,38 @@ set -euo pipefail
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     cat <<'EOF'
-Usage: reproduce_leak.sh [DURATION_MIN] [BAD_RATIO] [--no-molodec]
+Usage: reproduce_leak.sh [DURATION_MIN] [BAD_RATIO] [OPTIONS]
 
 Reproduce insights-core memory leak in the monolithic deployment.
 
+Positional arguments:
   DURATION_MIN    How long to run in minutes (default: 30)
   BAD_RATIO       Fraction of bad archives 0.0-1.0 (default: 0.0)
+
+Options:
   --no-molodec    Use self-contained archives instead of molodec
+  --parallel N    Number of parallel upload workers (default: 3)
+  --delay N       Seconds between uploads per worker (default: 0)
+  --burst         Burst mode: 10 min send + 1 min break cycles
+  --url URL       Upload endpoint (default: http://localhost:8000/api/ingress/v1/upload)
+  -h, --help      Show this help
 
 What it does:
   1. Sets up a Python venv with molodec (if not present)
   2. Tears down any existing containers and volumes
   3. Starts a fresh podman compose stack
   4. Checks whether the insights-core traceback fix is applied
-  5. Uploads molodec archives with 3 parallel workers while monitoring
+  5. Uploads molodec archives with parallel workers while monitoring
   6. Prints a leak evaluation report (skips first 5 min warm-up)
   7. Stops containers on exit
 
 Examples:
-  ./reproduce_leak.sh                    # 30 min, molodec archives
-  ./reproduce_leak.sh 60                 # 60 min
-  ./reproduce_leak.sh 60 0.3             # 60 min, 30% bad archives
-  ./reproduce_leak.sh 30 0 --no-molodec  # self-contained archives
+  ./reproduce_leak.sh                        # 30 min, molodec, 3 workers
+  ./reproduce_leak.sh 60                     # 60 min
+  ./reproduce_leak.sh 60 0.3                 # 60 min, 30% bad archives
+  ./reproduce_leak.sh 30 0 --no-molodec      # self-contained archives
+  ./reproduce_leak.sh 30 0 --parallel 5      # 5 parallel workers
+  ./reproduce_leak.sh 60 0 --burst           # burst mode
 
 Press Ctrl+C to stop early — summary is still printed.
 EOF
