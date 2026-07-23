@@ -6,9 +6,10 @@
 # launches monitoring + load generation, and prints a summary on exit.
 #
 # Usage:
-#   ./reproduce_leak.sh                # 30 min, 100% bad archives, max speed
-#   ./reproduce_leak.sh 60             # 60 min
-#   ./reproduce_leak.sh 120 0.5        # 120 min, 50% bad archives
+#   ./reproduce_leak.sh                    # 30 min, molodec, 3 workers
+#   ./reproduce_leak.sh 60                 # 60 min
+#   ./reproduce_leak.sh 60 0.3             # 60 min, 30% bad archives
+#   ./reproduce_leak.sh --help             # show all options
 
 set -euo pipefail
 
@@ -55,15 +56,24 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Parse args: strip flags first, then assign positional
+# Parse args: extract flags and key=value options, rest is positional
 NO_MOLODEC=""
+PARALLEL=""
+DELAY=""
+BURST=""
+UPLOAD_URL=""
 POSITIONAL=()
-for arg in "$@"; do
-    case "$arg" in
+while [ $# -gt 0 ]; do
+    case "$1" in
         --no-molodec) NO_MOLODEC="--no-molodec" ;;
+        --burst)      BURST="--burst" ;;
+        --parallel)   PARALLEL="$2"; shift ;;
+        --delay)      DELAY="$2"; shift ;;
+        --url)        UPLOAD_URL="$2"; shift ;;
         --help|-h)    ;; # handled above
-        *)            POSITIONAL+=("$arg") ;;
+        *)            POSITIONAL+=("$1") ;;
     esac
+    shift
 done
 DURATION_MIN="${POSITIONAL[0]:-30}"
 BAD_RATIO="${POSITIONAL[1]:-0.0}"
@@ -87,8 +97,8 @@ cleanup() {
         wait "$MONITOR_PID" 2>/dev/null || true
     fi
 
-    # Report for insights-app (skip first 5 min warm-up)
-    WARMUP_MIN=5
+    # Report for insights-app (skip first 2 min warm-up)
+    WARMUP_MIN=2
     CSV="$OUTPUT_DIR/insights-app_podman_stats.csv"
     DISK_CSV="$OUTPUT_DIR/insights-app_disk_usage.csv"
 
@@ -242,9 +252,14 @@ sleep 3
 echo ""
 echo "=== Starting load generation ==="
 
-echo "  Mode: continuous, 3 parallel workers"
 echo "  Duration: ${DURATION_MIN} min"
 echo "  Bad ratio: ${BAD_RATIO}"
+echo "  Workers:  ${PARALLEL:-3}"
+if [ -n "$BURST" ]; then
+    echo "  Mode:     burst (10min send + 1min break)"
+else
+    echo "  Mode:     continuous"
+fi
 if [ -n "$NO_MOLODEC" ]; then
     echo "  Archives: self-contained"
 else
@@ -252,10 +267,17 @@ else
 fi
 echo ""
 
-"$PYTHON" "$SCRIPT_DIR/send_archives.py" \
-    --duration "$DURATION_MIN" \
-    --bad-ratio "$BAD_RATIO" \
-    $NO_MOLODEC &
+SEND_ARGS=(
+    --duration "$DURATION_MIN"
+    --bad-ratio "$BAD_RATIO"
+)
+[ -n "$PARALLEL" ]   && SEND_ARGS+=(--parallel "$PARALLEL")
+[ -n "$DELAY" ]      && SEND_ARGS+=(--delay "$DELAY")
+[ -n "$BURST" ]      && SEND_ARGS+=(--burst)
+[ -n "$NO_MOLODEC" ] && SEND_ARGS+=(--no-molodec)
+[ -n "$UPLOAD_URL" ] && SEND_ARGS+=(--url "$UPLOAD_URL")
+
+"$PYTHON" "$SCRIPT_DIR/send_archives.py" "${SEND_ARGS[@]}" &
 SEND_PID=$!
 echo "  Load generator PID: $SEND_PID"
 

@@ -207,11 +207,11 @@ def run_continuous(args, make_archive_fn):
                     if is_bad:
                         counters["bad"] += 1
                     total = counters["sent"]
+                    bad = counters["bad"]
+                    should_print = (total % 100 == 0)
 
-                if total % 100 == 0:
+                if should_print:
                     elapsed_min = (time.time() - start) / 60
-                    with lock:
-                        bad = counters["bad"]
                     print(
                         f"[{elapsed_min:.1f}min] Sent {total} ({bad} bad) "
                         f"(Status: {status})"
@@ -287,11 +287,11 @@ def run_burst(args, make_archive_fn):
                         if is_bad:
                             counters["bad"] += 1
                         total = counters["sent"]
+                        bad = counters["bad"]
+                        should_print = (total % 100 == 0)
 
-                    if total % 100 == 0:
+                    if should_print:
                         elapsed = time.time() - burst_start
-                        with lock:
-                            bad = counters["bad"]
                         print(
                             f"  [Cycle {cycle+1}] Sent {total} ({bad} bad) "
                             f"in {elapsed:.0f}s (Status: {status})"
@@ -339,7 +339,7 @@ def main():
         help="Fraction of bad archives 0.0-1.0 (default: 0.0)",
     )
     parser.add_argument(
-        "--parallel", type=int, default=3,
+        "--parallel", type=int, default=10,
         help="Number of parallel upload workers (default: 3)",
     )
     parser.add_argument(
