@@ -132,7 +132,7 @@ oc get pods -n insights-on-prem-poc
 oc get policy -n insights-on-prem-poc
 
 # Verify insights-client and console env overrides via MCH
-oc get mch multiclusterhub -n open-cluster-management -o jsonpath='{.spec.overrides.components}' | python3 -m json.tool
+oc get mch multiclusterhub -n open-cluster-management -o json | jq '.spec.overrides.components'
 
 # Verify console URP URL
 oc get configmap console-config -n open-cluster-management -o jsonpath='{.data.UPGRADE_RISKS_PREDICTION_URL}'
