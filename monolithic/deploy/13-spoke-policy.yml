@@ -146,29 +146,6 @@ spec:
                     name: insights-on-prem-proxy-ca-bundle
             {{- end }}
 
-    # --- Service CA for insights-client (ACM report retrieval) ---
-    # insights-client in open-cluster-management goes through the spoke proxy.
-    # The proxy uses a service-serving cert, so insights-client needs the
-    # service CA to verify it. The inject-cabundle annotation makes OpenShift
-    # populate this ConfigMap with the service-serving CA automatically.
-    - objectDefinition:
-        apiVersion: policy.open-cluster-management.io/v1
-        kind: ConfigurationPolicy
-        metadata:
-          name: insights-client-service-ca
-        spec:
-          remediationAction: enforce
-          severity: medium
-          object-templates:
-            - complianceType: musthave
-              objectDefinition:
-                apiVersion: v1
-                kind: ConfigMap
-                metadata:
-                  name: insights-on-prem-proxy-ca
-                  namespace: open-cluster-management
-                  annotations:
-                    service.beta.openshift.io/inject-cabundle: "true"
 
     # --- Insights Operator configuration ---
     - objectDefinition:
