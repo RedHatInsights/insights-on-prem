@@ -97,35 +97,35 @@ cleanup() {
         wait "$MONITOR_PID" 2>/dev/null || true
     fi
 
-    # Report for insights-app (skip first 2 min warm-up)
-    WARMUP_MIN=2
+    # Report for insights-app (monitoring started after warm-up)
     CSV="$OUTPUT_DIR/insights-app_podman_stats.csv"
     DISK_CSV="$OUTPUT_DIR/insights-app_disk_usage.csv"
 
     if [ -f "$CSV" ] && [ "$(wc -l < "$CSV")" -gt 1 ]; then
         echo ""
-        awk -F',' -v warmup="$WARMUP_MIN" '
+        awk -F',' '
         NR>1 && $4+0>0 {
-            if(!got_first) { first=$4+0; got_first=1 }
-            if($2+0 >= warmup && !got_steady) { steady=$4+0; steady_t=$2+0; got_steady=1 }
+            if(!n++) { first=$4+0; first_t=$2+0 }
             last=$4+0; last_t=$2+0
         } END {
-            if(!got_steady) { steady=first; steady_t=0; got_steady=1 }
-            mins = last_t - steady_t
-            if(mins < 1) mins = 1
-            rate = (last - steady) / (mins / 60)
+            if(n>0) {
+                mins = last_t - first_t
+                if(mins < 1) mins = 1
+                rate = (last - first) / (mins / 60)
 
-            printf "=== Report (insights-app) ===\n"
-            printf "  Warm-up:  %.1f -> %.1f MiB (first %d min, excluded)\n", first, steady, warmup
-            printf "  Steady:   %.1f -> %.1f MiB  delta=%+.1f MiB  over %d min\n", steady, last, last-steady, mins
-            printf "  Rate:     %+.1f MiB/hr\n", rate
+                printf "=== Report (insights-app) ===\n"
+                printf "  Start:    %.1f MiB\n", first
+                printf "  End:      %.1f MiB\n", last
+                printf "  Delta:    %+.1f MiB over %d min\n", last-first, mins
+                printf "  Rate:     %+.1f MiB/hr\n", rate
 
-            if(rate < 1)
-                printf "  Verdict:  STABLE — no leak detected\n"
-            else if(rate < 10)
-                printf "  Verdict:  POSSIBLE LEAK — moderate growth (%.1f MiB/hr)\n", rate
-            else
-                printf "  Verdict:  LEAK DETECTED — significant growth (%.1f MiB/hr)\n", rate
+                if(rate < 1)
+                    printf "  Verdict:  STABLE — no leak detected\n"
+                else if(rate < 10)
+                    printf "  Verdict:  POSSIBLE LEAK — moderate growth (%.1f MiB/hr)\n", rate
+                else
+                    printf "  Verdict:  LEAK DETECTED — significant growth (%.1f MiB/hr)\n", rate
+            }
         }' "$CSV"
 
         # Disk usage
@@ -240,7 +240,42 @@ else
 fi
 echo ""
 
-# --- Start monitoring ---
+# --- Warm-up: upload 3 archives to load components ---
+echo "=== Warm-up (uploading 3 archives to load insights-core components) ==="
+"$PYTHON" "$SCRIPT_DIR/send_archives.py" \
+    --duration 999 \
+    --bad-ratio "$BAD_RATIO" \
+    --parallel 1 \
+    $( [ -n "$NO_MOLODEC" ] && echo "--no-molodec" ) \
+    $( [ -n "$UPLOAD_URL" ] && echo "--url $UPLOAD_URL" ) &
+WARMUP_PID=$!
+
+# Wait for 3 archives to be processed (watch the logs)
+WARMUP_COUNT=0
+WARMUP_TIMEOUT=120
+WARMUP_WAITED=0
+while [ "$WARMUP_COUNT" -lt 3 ] && [ "$WARMUP_WAITED" -lt "$WARMUP_TIMEOUT" ]; do
+    sleep 2
+    WARMUP_WAITED=$((WARMUP_WAITED + 2))
+    WARMUP_COUNT=$(podman logs insights-app 2>&1 | grep -c "Starting archive processing" || echo 0)
+    echo "  Warm-up: ${WARMUP_COUNT}/3 archives processed..."
+done
+
+kill "$WARMUP_PID" 2>/dev/null || true
+wait "$WARMUP_PID" 2>/dev/null || true
+
+if [ "$WARMUP_COUNT" -ge 3 ]; then
+    echo "  Warm-up complete — components loaded"
+else
+    echo "  WARNING: only ${WARMUP_COUNT}/3 warm-up archives processed (timeout)"
+fi
+
+# Capture baseline memory after warm-up
+BASELINE_MEM=$(podman stats --no-stream --format "{{.MemUsage}}" insights-app 2>/dev/null | awk '{print $1}' | sed 's/[A-Za-z]*//g')
+echo "  Baseline memory: ${BASELINE_MEM} MiB"
+echo ""
+
+# --- Start monitoring (after warm-up, so baseline is clean) ---
 echo "=== Starting monitoring ==="
 bash "$SCRIPT_DIR/monitor.sh" "$DURATION_MIN" "$OUTPUT_DIR" &
 MONITOR_PID=$!
