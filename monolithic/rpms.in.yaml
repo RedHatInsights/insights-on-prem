@@ -1,0 +1,28 @@
+contentOrigin:
+  repofiles: ["./redhat.repo"]
+context:
+  # Must match the Dockerfile's FROM image exactly. rpm-lockfile-prototype
+  # inspects the RPMs already installed in this image to resolve the
+  # dependency graph; if it points at a different image (e.g. ubi9-minimal),
+  # already-installed packages like glibc can be at a different version than
+  # what's baked into ocp-rules-rhel9, and microdnf's hermetic depsolve fails
+  # with "nothing provides glibc = <locked-version>".
+  image: registry.redhat.io/lightspeed-services-ocp/ocp-rules-rhel9:2026.06.30
+packages:
+  # Required by maturin to build Rust-based Python extensions from source
+  # (pydantic-core, uvloop, watchfiles)
+  - rust
+  - cargo
+  # C/C++ compilers + headers, required to build C/C++ extensions from source
+  # (httptools, greenlet, and other sdists). The base image ships python3.12
+  # (not the RHEL9 default python3/3.9), so we need python3.12-devel to match
+  # the venv's headers, not python3-devel.
+  - gcc
+  - gcc-c++
+  - python3.12-devel
+  # sqlite3 CLI / headers
+  - sqlite
+  # Provides pg_config, required to build psycopg2-binary from source
+  - postgresql-devel
+arches:
+  - x86_64

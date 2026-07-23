@@ -1,0 +1,4 @@
+# This package is installed in the base image, so no need to include it in the
+# requirements.txt. However, if you are running the script locally, you may
+# need to install it manually
+ccx-rules-ocp

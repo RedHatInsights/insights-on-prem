@@ -48,6 +48,35 @@ GET /health
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
 
+## Hermetic Builds
+
+The monolithic Dockerfile is built hermetically by Konflux (network access disabled during the build), using [Hermeto](https://hermetoproject.github.io/hermeto/) to prefetch pip and RPM dependencies beforehand. See `requirements-in.txt` (source for `pip-compile`), `requirements.txt`/`requirements-build.txt` (pinned lockfiles), and `rpms.in.yaml`/`rpms.lock.yaml` (RPM lockfile, regenerated via `../scripts/update_rpm_lockfile.sh`).
+
+### Regenerating requirements.txt / requirements-build.txt / rpms.in.yaml
+
+To add or upgrade a Python dependency, edit `requirements-in.txt`, then regenerate the pinned files. **Always do this inside a `linux/amd64` Python 3.12 container** (matching the base image and Konflux's build platform) — running `pip-compile` on macOS/arm64 silently drops dependencies whose markers only match `x86_64`/`aarch64` (e.g. SQLAlchemy's `greenlet`), since pip-compile resolves environment markers against the machine it runs on, not the target platform:
+
+```bash
+cd monolithic
+podman run --rm --platform linux/amd64 -v "$(pwd):/work:Z" -w /work python:3.12-slim bash -c '
+  pip install -q pip-tools pybuild-deps
+  pip-compile --output-file=requirements.txt requirements-in.txt
+  pybuild-deps compile --generate-hashes --output-file=requirements-build.txt requirements.txt
+'
+```
+
+`requirements.txt` is the fully-pinned runtime lockfile; `requirements-build.txt` lists the build-backend sdists (e.g. `setuptools`, `cython`, `maturin`) Hermeto needs to prefetch so packages without prebuilt wheels can be built from source in the hermetic build.
+
+Some RPMs (e.g. `postgresql-devel`) are only available on the entitled RHEL CDN, not the public UBI repos. Konflux's `prefetch-dependencies` task needs an `activation-key` secret in the `obsint-processing-tenant` namespace to authenticate to that CDN — without it, prefetching fails with a misleading `SSLCertVerificationError: self-signed certificate in certificate chain`. This secret is namespace-scoped (shared with `rules-containers`), see the value in Bitwarden, so it only needs to be created once per tenant:
+
+```bash
+oc create -f <path-to>/activation-key-secret.yaml
+```
+
+You may need to follow https://konflux.pages.redhat.com/docs/users/building/activation-keys-subscription.html#Create-custom-activation-key-secret to troubleshoot any issues.
+
+`rpms.in.yaml`'s `context.image` must be kept in sync with the Dockerfile's `FROM` tag. `rpm-lockfile-prototype` resolves dependencies against the RPMs already installed in that image, so pointing it at a different image (or a stale tag) can lock in package versions (e.g. `glibc-devel`) that don't match what's actually baked into the real base image, causing `microdnf install` to fail in the hermetic build with `nothing provides glibc = <locked-version>`. Whenever you bump the base image tag in the Dockerfile, update `context.image` to match and rerun `../scripts/update_rpm_lockfile.sh`.
+
 ## Building and Pushing Multiarch Image
 
 Build and push a multiarch (amd64, arm64) image to Quay (this step is necessary because cluster nodes may run on different architecture than the development environment):

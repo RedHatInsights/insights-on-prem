@@ -8,10 +8,18 @@ ENV HOME=/app \
 
 WORKDIR /app
 
-COPY requirements-build.txt .
 # hadolint ignore=DL3041  # We prefer to use latest versions of dnf pkgs
-RUN microdnf install --nodocs -y sqlite postgresql-devel && \
-    /opt/venv/bin/pip install --no-cache-dir -U -r requirements-build.txt && \
+# gcc, gcc-c++, python3.12-devel, rust and cargo are build-only tools needed
+# to compile Python packages from source (pydantic-core, uvloop, httptools,
+# watchfiles, greenlet, ...). gcc-c++ is required for C++ extensions (greenlet).
+# python3.12-devel (not python3-devel) is required because this base image
+# ships python3.12 directly, not the RHEL9 default python3 (3.9).
+# requirements-build.txt is not installed here: it only tells Hermeto/Cachi2
+# which build-backend sdists to prefetch, so `pip install -r requirements.txt`
+# below can resolve them from the offline index during a hermetic build.
+# hadolint ignore=DL3041
+RUN microdnf install --nodocs -y sqlite postgresql-devel gcc gcc-c++ python3.12-devel rust cargo && \
+    /opt/venv/bin/pip install --no-cache-dir -U pip setuptools wheel && \
     microdnf clean all && \
     mkdir -p /tmp/insights-uploads && chmod 777 /tmp/insights-uploads
 
