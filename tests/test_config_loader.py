@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import pytest
 import yaml
+
 from app.config import AppConfig
 from app.config_loader import load_config, load_insights_components
 from app.exceptions import ProcessingError

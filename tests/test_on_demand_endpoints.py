@@ -5,9 +5,10 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import pytest
+from fastapi.testclient import TestClient
+
 from app.main import app
 from app.models import RequestReport
-from fastapi.testclient import TestClient
 
 client = TestClient(app)
 

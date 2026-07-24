@@ -4,6 +4,7 @@ import json
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
+
 from app.config import AppConfig
 from app.exceptions import ProcessingError
 from app.models import Report, RuleHit

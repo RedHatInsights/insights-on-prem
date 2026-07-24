@@ -4,6 +4,7 @@ from unittest.mock import mock_open, patch
 
 import httpx
 import pytest
+
 from app.config import AppConfig
 from app.services.thanos_service import ThanosService
 

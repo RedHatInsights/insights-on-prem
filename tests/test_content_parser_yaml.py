@@ -3,6 +3,7 @@
 import os
 
 import pytest
+
 from app.content_parser_yaml import YAMLContentParser
 from app.exceptions import ProcessingError
 

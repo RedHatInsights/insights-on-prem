@@ -5,11 +5,12 @@ import tempfile
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from fastapi import BackgroundTasks
+
 from app.config import AppConfig
 from app.exceptions import ValidationError
 from app.schemas import UploadResponse
 from app.services.upload_service import UploadService
-from fastapi import BackgroundTasks
 
 
 @pytest.fixture
