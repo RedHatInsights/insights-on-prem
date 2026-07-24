@@ -3,6 +3,7 @@
 from datetime import datetime
 
 import pytest
+
 from app.utils.content import format_datetime_rfc3339, normalize_rule_fqdn
 
 

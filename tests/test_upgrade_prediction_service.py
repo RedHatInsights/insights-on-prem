@@ -1,6 +1,7 @@
 """Tests for UpgradePredictionService."""
 
 import pytest
+
 from app.services.thanos_service import Alert, OperatorCondition
 from app.services.upgrade_prediction_service import UpgradePredictionService
 

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
 
 import pytest
+
 from app.models import Report, RuleHit
 from app.schemas import ReportMetaV2, ReportV2
 from app.services.report_service import ReportService

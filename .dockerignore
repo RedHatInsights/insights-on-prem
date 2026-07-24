@@ -13,5 +13,13 @@ docker-compose.yml
 Dockerfile
 .dockerignore
 tests
+tests-image
 deploy
 deploy.sh
+benchmark
+diagrams
+docs
+microservices
+.tekton
+.github
+.claude

@@ -5,11 +5,12 @@ from io import BytesIO
 from unittest.mock import Mock
 
 import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import sessionmaker
+
 from app.config import AppConfig
 from app.main import app
 from app.services.upload_service import UploadService
-from fastapi.testclient import TestClient
-from sqlalchemy.orm import sessionmaker
 
 client = TestClient(app)
 
