@@ -28,6 +28,7 @@ Options:
   --parallel N    Number of parallel upload workers (default: 3)
   --delay N       Seconds between uploads per worker (default: 0)
   --burst         Burst mode: 10 min send + 1 min break cycles
+  --cooldown N    Minutes of idle monitoring after load stops (default: 5)
   --url URL       Upload endpoint (default: http://localhost:8000/api/ingress/v1/upload)
   -h, --help      Show this help
 
@@ -47,6 +48,7 @@ Examples:
   ./reproduce_leak.sh 30 0 --no-molodec      # self-contained archives
   ./reproduce_leak.sh 30 0 --parallel 5      # 5 parallel workers
   ./reproduce_leak.sh 60 0 --burst           # burst mode
+  ./reproduce_leak.sh 30 0 --cooldown 10     # 10 min cool-down
 
 Press Ctrl+C to stop early — summary is still printed.
 EOF
@@ -61,12 +63,14 @@ NO_MOLODEC=""
 PARALLEL=""
 DELAY=""
 BURST=""
+COOLDOWN_MIN="5"
 UPLOAD_URL=""
 POSITIONAL=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --no-molodec) NO_MOLODEC="--no-molodec" ;;
         --burst)      BURST="--burst" ;;
+        --cooldown)   COOLDOWN_MIN="$2"; shift ;;
         --parallel)   PARALLEL="$2"; shift ;;
         --delay)      DELAY="$2"; shift ;;
         --url)        UPLOAD_URL="$2"; shift ;;
@@ -103,10 +107,11 @@ cleanup() {
 
     if [ -f "$CSV" ] && [ "$(wc -l < "$CSV")" -gt 1 ]; then
         echo ""
-        awk -F',' '
+        awk -F',' -v load_min="$DURATION_MIN" '
         NR>1 && $4+0>0 {
             if(!n++) { first=$4+0; first_t=$2+0 }
             last=$4+0; last_t=$2+0
+            if($2+0 <= load_min) { at_load_end=$4+0; at_load_end_t=$2+0 }
         } END {
             if(n>0) {
                 mins = last_t - first_t
@@ -115,7 +120,20 @@ cleanup() {
 
                 printf "=== Report (insights-app) ===\n"
                 printf "  Start:    %.1f MiB\n", first
-                printf "  End:      %.1f MiB\n", last
+                if(at_load_end+0 > 0) {
+                    printf "  At load stop: %.1f MiB  (after %d min)\n", at_load_end, at_load_end_t
+                    printf "  After cool-down: %.1f MiB  (after %d min)\n", last, last_t
+                    cooldown_delta = last - at_load_end
+                    printf "  Cool-down delta: %+.1f MiB\n", cooldown_delta
+                    if(cooldown_delta < -5)
+                        printf "  Cool-down:  RELEASED — memory dropped after load stopped\n"
+                    else if(cooldown_delta > 5)
+                        printf "  Cool-down:  STILL GROWING — memory rose even without load\n"
+                    else
+                        printf "  Cool-down:  RETAINED — memory stayed flat (not released)\n"
+                } else {
+                    printf "  End:      %.1f MiB\n", last
+                }
                 printf "  Delta:    %+.1f MiB over %d min\n", last-first, mins
                 printf "  Rate:     %+.1f MiB/hr\n", rate
 
@@ -182,8 +200,10 @@ if [ ! -x "$PYTHON" ]; then
     exit 1
 fi
 
+TOTAL_MONITOR_MIN=$((DURATION_MIN + COOLDOWN_MIN))
+
 echo "  Compose dir: $COMPOSE_DIR"
-echo "  Duration:    ${DURATION_MIN} minutes"
+echo "  Duration:    ${DURATION_MIN} minutes (+ ${COOLDOWN_MIN} min cool-down)"
 echo "  Bad ratio:   ${BAD_RATIO}"
 echo "  Output:      $OUTPUT_DIR"
 echo ""
@@ -277,7 +297,7 @@ echo ""
 
 # --- Start monitoring (after warm-up, so baseline is clean) ---
 echo "=== Starting monitoring ==="
-bash "$SCRIPT_DIR/monitor.sh" "$DURATION_MIN" "$OUTPUT_DIR" &
+bash "$SCRIPT_DIR/monitor.sh" "$TOTAL_MONITOR_MIN" "$OUTPUT_DIR" &
 MONITOR_PID=$!
 echo "  Monitor PID: $MONITOR_PID"
 
@@ -329,13 +349,13 @@ wait "$SEND_PID" 2>/dev/null || true
 SEND_PID=""
 
 echo ""
-echo "Load generation complete. Waiting for monitor to finish..."
-sleep 15
+echo "=== Cool-down (${COOLDOWN_MIN} min, no archives sent — watching memory) ==="
 
+# Wait for monitor to finish (it runs for DURATION_MIN + COOLDOWN_MIN)
 if [ -n "$MONITOR_PID" ] && kill -0 "$MONITOR_PID" 2>/dev/null; then
-    kill "$MONITOR_PID" 2>/dev/null || true
     wait "$MONITOR_PID" 2>/dev/null || true
 fi
 MONITOR_PID=""
 
+echo ""
 echo "Done."
