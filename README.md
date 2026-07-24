@@ -2,11 +2,6 @@
 
 A Python application that receives Insights archives, processes them with insights-core, and stores results in PostgreSQL. Designed for on-premise deployment in ACM clusters.
 
-- **Test infra** (`tests-image/`) — containerized test runtime image built by Tekton, used for integration and e2e testing
-- **CI** — Tekton pipelines (`.tekton/`) for image builds, GitHub Actions for linting and unit tests
-
----
-
 ## API Endpoints
 
 ### Upload Archive
