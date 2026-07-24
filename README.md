@@ -7,8 +7,6 @@ A Python application that receives Insights archives, processes them with insigh
 
 ---
 
-The original microservices-based approach (deploying the full console.redhat.com pipeline components individually) was explored early on but we decided to pursue the monolithic architecture instead. The microservices deployment files are preserved on the [`microservices`](https://github.com/RedHatInsights/insights-on-prem/tree/microservices) branch for reference.
-
 ## API Endpoints
 
 ### Upload Archive
