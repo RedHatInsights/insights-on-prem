@@ -32,14 +32,14 @@ spec:
   - name: dockerfile
     value: Dockerfile
   - name: path-context
-    value: monolithic
+    value: .
   - name: hermetic
     value: "true"
   - name: prefetch-input
     value: >-
       [
-        {"type": "pip", "path": "monolithic"},
-        {"type": "rpm", "path": "monolithic"}
+        {"type": "pip", "path": "."},
+        {"type": "rpm", "path": "."}
       ]
   pipelineRef:
     name: docker-build

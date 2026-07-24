@@ -1,4 +1,4 @@
-name: Unit Tests (monolithic)
+name: Unit Tests
 
 on:
   push:
@@ -22,10 +22,9 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install -r monolithic/requirements-test.txt
+          pip install -r requirements-test.txt
 
       - name: Run unit tests with coverage
-        working-directory: monolithic
         run: pytest tests/ -v --tb=short --cov=. --cov-report=xml:coverage.xml
 
       - name: Upload coverage to Codecov
@@ -33,5 +32,5 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           flags: unit-tests
-          files: monolithic/coverage.xml
+          files: coverage.xml
           fail_ci_if_error: false

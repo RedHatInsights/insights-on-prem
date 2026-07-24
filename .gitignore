@@ -1,9 +1,9 @@
 __pycache__/
-monolithic/deploy/02-pull-secret.yml
+deploy/02-pull-secret.yml
 
 # Transient entitled repo file used by scripts/update_rpm_lockfile.sh
-monolithic/redhat.repo
-monolithic/archive.tar
-monolithic/deploy/ccxdev-insights-on-prem-poc-secret.yml
+redhat.repo
+archive.tar
+deploy/ccxdev-insights-on-prem-poc-secret.yml
 scripts/.dockerconfig.json
 .cursor/
