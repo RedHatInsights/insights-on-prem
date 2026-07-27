@@ -14,12 +14,12 @@ spec:
       resource: addondeploymentconfigs
       defaultConfig:
         name: insights-operator-proxy
-        namespace: insights-on-prem-poc
+        namespace: insights-on-prem
   installStrategy:
     type: Placements
     placements:
       - name: all-managed-clusters
-        namespace: insights-on-prem-poc
+        namespace: insights-on-prem
         configs:
           - group: addon.open-cluster-management.io
             resource: addontemplates

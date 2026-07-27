@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: insights-on-prem
-  namespace: insights-on-prem-poc
+  namespace: insights-on-prem
 spec:
   replicas: 1
   template:
@@ -65,7 +65,7 @@ spec:
           - key: tls.crt
             path: ca.crt
       imagePullSecrets:
-      - name: ccxdev-insights-on-prem-poc-pull-secret
+      - name: ccxdev-insights-on-prem-pull-secret
   selector:
     matchLabels:
       app: insights-on-prem

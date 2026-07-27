@@ -13,7 +13,7 @@ spec:
           groups:
             - system:open-cluster-management:insights-operator-proxy
         signingCA:
-          namespace: insights-on-prem-poc
+          namespace: insights-on-prem
           name: insights-on-prem-client-ca
   agentSpec:
     workload:

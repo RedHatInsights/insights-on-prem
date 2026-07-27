@@ -148,16 +148,16 @@ Resources converge automatically — Policies retry until dependencies are met, 
 
 #### Secrets
 
-The postgres password is stored in the secret `insights-postgres` in the `insights-on-prem-poc` namespace, defined in `deploy/03-postgres.yml`. Note that this is not the best practice, so please use the preferred method on your cluster to define the secret. We kept it there to make it easier to deploy the application without human intervention.
+The postgres password is stored in the secret `insights-postgres` in the `insights-on-prem` namespace, defined in `deploy/03-postgres.yml`. Note that this is not the best practice, so please use the preferred method on your cluster to define the secret. We kept it there to make it easier to deploy the application without human intervention.
 
 ### Verify Deployment
 
 ```bash
 # Check pod status
-oc get pods -n insights-on-prem-poc
+oc get pods -n insights-on-prem
 
 # Check policy compliance (all should be Compliant)
-oc get policy -n insights-on-prem-poc
+oc get policy -n insights-on-prem
 
 # Verify insights-client and console env overrides via MCH
 oc get mch multiclusterhub -n open-cluster-management -o json | jq '.spec.overrides.components'
@@ -166,7 +166,7 @@ oc get mch multiclusterhub -n open-cluster-management -o json | jq '.spec.overri
 oc get configmap console-config -n open-cluster-management -o jsonpath='{.data.UPGRADE_RISKS_PREDICTION_URL}'
 
 # Check logs
-oc logs -f deployment/insights-on-prem -n insights-on-prem-poc
+oc logs -f deployment/insights-on-prem -n insights-on-prem
 ```
 
 ### Important Notes
@@ -175,7 +175,7 @@ oc logs -f deployment/insights-on-prem -n insights-on-prem-poc
 
 ## On-Demand Data Gathering
 
-On-demand data gathering allows triggering Insights data collection outside the regular periodic schedule. Instead of waiting for the next periodic upload (default 2h, set to 1m by `deploy/14-hub-config.yml`), you can request an immediate gather-and-upload cycle and get results for that specific request.
+On-demand data gathering allows triggering Insights data collection outside the regular periodic schedule. Instead of waiting for the next periodic upload (default 2h, set to 1m by `deploy/14-hub-config.yml` for faster feedback), you can request an immediate gather-and-upload cycle and get results for that specific request.
 
 > **Note:** Conditional data gathering is not supported at this moment. Disable the `conditional` gatherer in the `DataGather` CR to avoid unnecessary calls to `console.redhat.com` for gathering rules (as shown in the following section).
 
@@ -264,7 +264,7 @@ webhooks:
 EOF
 ```
 
-The command should trigger [webhook_timeout_is_larger_than_default](https://gitlab.cee.redhat.com/ccx/ccx-rules-ocp/-/blob/master/ccx_rules_ocp/external/rules/webhook_timeout_is_larger_than_default.py) rule. Depending on the frequency of archive uploads from Insights Operator (set to 1 minute for PoC purposes by `deploy/14-hub-config.yml`, but default value is 2 hours), the recommendation and the `PolicyReport` should be created. You can check that with this command directly in the ACM cluster:
+The command should trigger [webhook_timeout_is_larger_than_default](https://gitlab.cee.redhat.com/ccx/ccx-rules-ocp/-/blob/master/ccx_rules_ocp/external/rules/webhook_timeout_is_larger_than_default.py) rule. Depending on the frequency of archive uploads from Insights Operator (set to 1 minute by `deploy/14-hub-config.yml`, but default value is 2 hours), the recommendation and the `PolicyReport` should be created. You can check that with this command directly in the ACM cluster:
 
 ```bash
 oc get policyreport --all-namespaces
@@ -326,5 +326,5 @@ The application deploys its own PostgreSQL database. Data older than 24 hours is
 docker-compose exec postgres psql -U insights -d insights
 
 # In cluster
-oc exec -it deployment/insights-postgres -n insights-on-prem-poc -- psql -U insights -d insights
+oc exec -it deployment/insights-postgres -n insights-on-prem -- psql -U insights -d insights
 ```

@@ -2,7 +2,7 @@ apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
   name: insights-on-prem
-  namespace: insights-on-prem-poc
+  namespace: insights-on-prem
 spec:
   port:
     targetPort: https
