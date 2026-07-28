@@ -296,7 +296,6 @@ HAProxy is deployed as an ACM managed cluster addon on every managed cluster, in
 
 > **Note:** The current deployment includes temporary workarounds that deviate from the diagram above:
 >
-> - A CONNECT proxy in `open-cluster-management` works around an ACM console limitation with service CA trust (to be removed by [#209](https://github.com/RedHatInsights/lightspeed-advisor-on-premise-ocp/pull/209) once the console fix is backported).
 > - A cluster-wide Proxy patch distributes the service CA to the Insights Operator until it natively supports a CA certificate field in its ConfigMap (to be removed by [#204](https://github.com/RedHatInsights/lightspeed-advisor-on-premise-ocp/pull/204)).
 
 ### Security
