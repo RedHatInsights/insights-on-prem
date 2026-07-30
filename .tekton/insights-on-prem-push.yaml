@@ -24,7 +24,7 @@ spec:
   - name: output-image
     value: quay.io/redhat-user-workloads/obsint-processing-tenant/insights-on-prem/insights-on-prem:{{revision}}
   - name: dockerfile
-    value: monolithic/Dockerfile
+    value: Dockerfile
   - name: path-context
     value: .
   pipelineSpec:
