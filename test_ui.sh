@@ -12,16 +12,16 @@ UI_TESTS="$SCRIPT_DIR/tests/ui"
 CLUSTER_ID=$(oc get clusterversion version -o jsonpath='{.spec.clusterID}')
 
 # Capture original values of deployments we mutate so they can be restored on exit.
-ORIG_THANOS_LOOKBACK=$(oc get deployment insights-on-prem -n insights-on-prem-poc \
+ORIG_THANOS_LOOKBACK=$(oc get deployment insights-on-prem -n insights-on-prem \
   -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="THANOS_QUERY_LOOKBACK_MINUTES")].value}' 2>/dev/null || echo "")
 
 restore() {
   echo "Restoring deployments to original state..."
   if [ -n "$ORIG_THANOS_LOOKBACK" ]; then
-    oc set env deployment/insights-on-prem -n insights-on-prem-poc \
+    oc set env deployment/insights-on-prem -n insights-on-prem \
       THANOS_QUERY_LOOKBACK_MINUTES="$ORIG_THANOS_LOOKBACK" 2>/dev/null || true
   else
-    oc set env deployment/insights-on-prem -n insights-on-prem-poc \
+    oc set env deployment/insights-on-prem -n insights-on-prem \
       THANOS_QUERY_LOOKBACK_MINUTES- 2>/dev/null || true
   fi
 }
@@ -59,8 +59,8 @@ echo "3. Configuring on-prem service to query current Thanos data..."
 # query, so freshly fired alerts wouldn't be visible. Setting to 0 queries the current
 # timestamp so new alerts are picked up immediately. This does NOT cause constant Thanos
 # requests — it only affects the timestamp used when /upgrade-risks-prediction is called.
-oc set env deployment/insights-on-prem -n insights-on-prem-poc THANOS_QUERY_LOOKBACK_MINUTES=0
-oc rollout status deployment/insights-on-prem -n insights-on-prem-poc --timeout=60s
+oc set env deployment/insights-on-prem -n insights-on-prem THANOS_QUERY_LOOKBACK_MINUTES=0
+oc rollout status deployment/insights-on-prem -n insights-on-prem --timeout=60s
 
 # ---------------------------------------------------------------------------
 echo ""
@@ -70,12 +70,12 @@ echo "4. Exposing on-prem service via HTTPS route (required for console backend)
 # must be reachable over HTTPS. This route is for testing only — in production the
 # addon would handle service exposure properly.
 oc create route edge insights-on-prem \
-  -n insights-on-prem-poc \
+  -n insights-on-prem \
   --service=insights-on-prem \
   --port=8000 \
   --insecure-policy=Redirect 2>/dev/null || true
 
-ON_PREM_ROUTE=$(oc get route insights-on-prem -n insights-on-prem-poc -o jsonpath='{.spec.host}')
+ON_PREM_ROUTE=$(oc get route insights-on-prem -n insights-on-prem -o jsonpath='{.spec.host}')
 ON_PREM_URP_URL="https://${ON_PREM_ROUTE}/api/insights-results-aggregator/v2/upgrade-risks-prediction"
 echo "   Route: $ON_PREM_URP_URL"
 
@@ -83,9 +83,9 @@ echo "   Route: $ON_PREM_URP_URL"
 echo ""
 echo "5. Waiting for alerts to reach Thanos (~2-5 min)..."
 # ---------------------------------------------------------------------------
-TOKEN=$(oc exec deployment/insights-on-prem -n insights-on-prem-poc -- cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+TOKEN=$(oc exec deployment/insights-on-prem -n insights-on-prem -- cat /var/run/secrets/kubernetes.io/serviceaccount/token)
 for _ in $(seq 1 10); do
-  COUNT=$(oc exec deployment/insights-on-prem -n insights-on-prem-poc -- sh -c \
+  COUNT=$(oc exec deployment/insights-on-prem -n insights-on-prem -- sh -c \
     "curl -sk -H 'Authorization: Bearer $TOKEN' \
      'https://rbac-query-proxy.open-cluster-management-observability.svc.cluster.local:8443/api/v1/query' \
      --data-urlencode 'query=ALERTS{alertname=~\"InsightsTest.*\"}' 2>/dev/null" | \
@@ -132,4 +132,4 @@ echo "To clean up:"
 echo "  oc delete validatingwebhookconfiguration insights-test-webhook"
 echo "  oc patch configs.samples.operator.openshift.io cluster --type merge -p '{\"spec\":{\"managementState\":\"Managed\"}}'"
 echo "  oc delete prometheusrule insights-test-alerts -n openshift-monitoring"
-echo "  oc delete route insights-on-prem -n insights-on-prem-poc"
+echo "  oc delete route insights-on-prem -n insights-on-prem"

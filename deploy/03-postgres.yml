@@ -3,7 +3,7 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: insights-postgres
-  namespace: insights-on-prem-poc
+  namespace: insights-on-prem
 type: Opaque
 stringData:
   database-user: insights
@@ -14,7 +14,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: insights-postgres
-  namespace: insights-on-prem-poc
+  namespace: insights-on-prem
 spec:
   accessModes:
   - ReadWriteOnce
@@ -26,7 +26,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: insights-postgres
-  namespace: insights-on-prem-poc
+  namespace: insights-on-prem
 spec:
   replicas: 1
   selector:
@@ -72,7 +72,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: insights-postgres
-  namespace: insights-on-prem-poc
+  namespace: insights-on-prem
 spec:
   selector:
     app: insights-postgres

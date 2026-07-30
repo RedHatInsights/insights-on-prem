@@ -32,7 +32,7 @@ apiVersion: policy.open-cluster-management.io/v1
 kind: Policy
 metadata:
   name: insights-on-prem-hub-certs
-  namespace: insights-on-prem-poc
+  namespace: insights-on-prem
 spec:
   remediationAction: enforce
   disabled: false
@@ -72,7 +72,7 @@ spec:
                 kind: Certificate
                 metadata:
                   name: insights-on-prem-server-ca
-                  namespace: insights-on-prem-poc
+                  namespace: insights-on-prem
                 spec:
                   isCA: true
                   secretName: insights-on-prem-server-ca
@@ -91,7 +91,7 @@ spec:
                 kind: Certificate
                 metadata:
                   name: insights-on-prem-client-ca
-                  namespace: insights-on-prem-poc
+                  namespace: insights-on-prem
                 spec:
                   isCA: true
                   secretName: insights-on-prem-client-ca
@@ -121,7 +121,7 @@ spec:
                 kind: Issuer
                 metadata:
                   name: insights-on-prem-server-issuer
-                  namespace: insights-on-prem-poc
+                  namespace: insights-on-prem
                 spec:
                   ca:
                     secretName: insights-on-prem-server-ca
@@ -142,16 +142,16 @@ spec:
                 kind: Certificate
                 metadata:
                   name: insights-on-prem-server-cert
-                  namespace: insights-on-prem-poc
+                  namespace: insights-on-prem
                 spec:
                   secretName: insights-on-prem-server-tls
                   duration: 8760h
                   renewBefore: 720h
-                  commonName: insights-on-prem.insights-on-prem-poc.svc
+                  commonName: insights-on-prem.insights-on-prem.svc
                   dnsNames:
-                    - insights-on-prem.insights-on-prem-poc.svc
-                    - insights-on-prem.insights-on-prem-poc.svc.cluster.local
-                    - {{ (lookup "route.openshift.io/v1" "Route" "insights-on-prem-poc" "insights-on-prem").spec.host }}
+                    - insights-on-prem.insights-on-prem.svc
+                    - insights-on-prem.insights-on-prem.svc.cluster.local
+                    - {{ (lookup "route.openshift.io/v1" "Route" "insights-on-prem" "insights-on-prem").spec.host }}
                   privateKey:
                     algorithm: RSA
                     size: 2048
@@ -176,7 +176,7 @@ spec:
           remediationAction: enforce
           severity: medium
           object-templates-raw: |
-            {{- $secret := (lookup "v1" "Secret" "insights-on-prem-poc" "insights-on-prem-server-tls") }}
+            {{- $secret := (lookup "v1" "Secret" "insights-on-prem" "insights-on-prem-server-tls") }}
             {{- if $secret.data }}
             - complianceType: musthave
               objectDefinition:
@@ -184,7 +184,7 @@ spec:
                 kind: Deployment
                 metadata:
                   name: insights-on-prem
-                  namespace: insights-on-prem-poc
+                  namespace: insights-on-prem
                 spec:
                   template:
                     metadata:
@@ -202,7 +202,7 @@ spec:
           remediationAction: enforce
           severity: medium
           object-templates-raw: |
-            {{- $ca := (lookup "v1" "Secret" "insights-on-prem-poc" "insights-on-prem-server-ca") }}
+            {{- $ca := (lookup "v1" "Secret" "insights-on-prem" "insights-on-prem-server-ca") }}
             {{- if $ca.data }}
             - complianceType: musthave
               objectDefinition:
@@ -210,7 +210,7 @@ spec:
                 kind: ConfigMap
                 metadata:
                   name: insights-on-prem-hub-ca
-                  namespace: insights-on-prem-poc
+                  namespace: insights-on-prem
                 data:
                   ca-bundle.crt: |
                     {{ index $ca.data "tls.crt" | base64dec | autoindent }}
@@ -220,7 +220,7 @@ apiVersion: cluster.open-cluster-management.io/v1beta1
 kind: Placement
 metadata:
   name: insights-on-prem-hub-only
-  namespace: insights-on-prem-poc
+  namespace: insights-on-prem
 spec:
   predicates:
     - requiredClusterSelector:
@@ -232,7 +232,7 @@ apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding
 metadata:
   name: insights-on-prem-hub-certs
-  namespace: insights-on-prem-poc
+  namespace: insights-on-prem
 placementRef:
   name: insights-on-prem-hub-only
   apiGroup: cluster.open-cluster-management.io
