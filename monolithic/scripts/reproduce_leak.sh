@@ -29,6 +29,7 @@ Options:
   --delay N       Seconds between uploads per worker (default: 0)
   --burst         Burst mode: 10 min send + 1 min break cycles
   --cooldown N    Minutes of idle monitoring after load stops (default: 5)
+  --memray        Profile the app with memray (installs in container, wraps uvicorn)
   --url URL       Upload endpoint (default: http://localhost:8000/api/ingress/v1/upload)
   -h, --help      Show this help
 
@@ -49,6 +50,7 @@ Examples:
   ./reproduce_leak.sh 30 0 --parallel 5      # 5 parallel workers
   ./reproduce_leak.sh 60 0 --burst           # burst mode
   ./reproduce_leak.sh 30 0 --cooldown 10     # 10 min cool-down
+  ./reproduce_leak.sh 10 0.3 --memray        # 10 min with memray profiling
 
 Press Ctrl+C to stop early — summary is still printed.
 EOF
@@ -65,6 +67,7 @@ DELAY=""
 BURST=""
 COOLDOWN_MIN="5"
 UPLOAD_URL=""
+USE_MEMRAY=""
 POSITIONAL=()
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -73,6 +76,7 @@ while [ $# -gt 0 ]; do
         --cooldown)   COOLDOWN_MIN="$2"; shift ;;
         --parallel)   PARALLEL="$2"; shift ;;
         --delay)      DELAY="$2"; shift ;;
+        --memray)     USE_MEMRAY=1 ;;
         --url)        UPLOAD_URL="$2"; shift ;;
         --help|-h)    ;; # handled above
         *)            POSITIONAL+=("$1") ;;
@@ -161,6 +165,23 @@ cleanup() {
         echo "Full data: $OUTPUT_DIR/"
     fi
 
+    # Extract memray profile before stopping containers
+    if [ -n "$USE_MEMRAY" ]; then
+        echo ""
+        echo "=== Extracting memray profile ==="
+        if podman cp insights-app:/tmp/memray-profile.bin "$OUTPUT_DIR/memray-profile.bin" 2>/dev/null; then
+            echo "  Profile: $OUTPUT_DIR/memray-profile.bin"
+            if python3 -m memray flamegraph "$OUTPUT_DIR/memray-profile.bin" \
+                -o "$OUTPUT_DIR/memray-flamegraph.html" 2>/dev/null; then
+                echo "  Flamegraph: $OUTPUT_DIR/memray-flamegraph.html"
+            else
+                echo "  (install memray locally to generate flamegraph: pip install memray)"
+            fi
+        else
+            echo "  WARNING: could not extract memray profile from container"
+        fi
+    fi
+
     echo "Stopping containers..."
     podman compose -f "$COMPOSE_DIR/docker-compose.yml" down 2>/dev/null || true
 }
@@ -205,6 +226,7 @@ TOTAL_MONITOR_MIN=$((DURATION_MIN + COOLDOWN_MIN))
 echo "  Compose dir: $COMPOSE_DIR"
 echo "  Duration:    ${DURATION_MIN} minutes (+ ${COOLDOWN_MIN} min cool-down)"
 echo "  Bad ratio:   ${BAD_RATIO}"
+echo "  Memray:      $([ -n "$USE_MEMRAY" ] && echo enabled || echo disabled)"
 echo "  Output:      $OUTPUT_DIR"
 echo ""
 
@@ -237,6 +259,60 @@ if [ $WAITED -ge $MAX_WAIT ]; then
     echo "ERROR: Timed out waiting for app to be ready"
     echo "Check: podman compose -f $COMPOSE_DIR/docker-compose.yml logs"
     exit 1
+fi
+
+# --- Enable memray profiling ---
+if [ -n "$USE_MEMRAY" ]; then
+    echo ""
+    echo "=== Setting up memray profiling ==="
+    echo "  Installing memray in container..."
+    if ! podman exec --user root insights-app /opt/venv/bin/pip install memray; then
+        echo "ERROR: failed to install memray in container"
+        exit 1
+    fi
+
+    echo "  Committing container with memray installed..."
+    podman commit insights-app insights-app-memray:latest
+
+    NETWORK_NAME=$(podman inspect --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}' insights-postgres 2>/dev/null)
+    podman compose -f "$COMPOSE_DIR/docker-compose.yml" stop app 2>/dev/null || true
+    podman rm insights-app 2>/dev/null || true
+
+    echo "  Restarting app under memray..."
+    podman run -d \
+        --name insights-app \
+        --network "$NETWORK_NAME" \
+        -p 8000:8000 -p 8443:8443 \
+        -e POSTGRES_HOST=postgres \
+        -e POSTGRES_PORT=5432 \
+        -e POSTGRES_DB=insights \
+        -e POSTGRES_USER=insights \
+        -e POSTGRES_PASSWORD=insights \
+        -e MAX_FILE_SIZE=104857600 \
+        -e TEMP_UPLOAD_DIR=/tmp/insights-uploads \
+        -e PYTHONUNBUFFERED=1 \
+        -v "$COMPOSE_DIR/app:/app/app" \
+        -v "$COMPOSE_DIR/config.yml:/app/config.yml" \
+        --memory 4g \
+        insights-app-memray:latest \
+        /opt/venv/bin/python -m memray run --output /tmp/memray-profile.bin \
+        /opt/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+    echo "  Waiting for app to restart..."
+    WAITED=0
+    while [ $WAITED -lt $MAX_WAIT ]; do
+        HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/health 2>/dev/null || echo "000")
+        if [ "$HTTP_CODE" = "200" ]; then
+            echo "  App ready under memray"
+            break
+        fi
+        sleep 5
+        WAITED=$((WAITED + 5))
+    done
+    if [ $WAITED -ge $MAX_WAIT ]; then
+        echo "ERROR: App failed to start under memray"
+        exit 1
+    fi
 fi
 
 # --- Check insights-core fix status ---
@@ -340,7 +416,7 @@ echo ""
 echo "=== Running ==="
 echo "  Monitor:  $MONITOR_PID"
 echo "  Load gen: $SEND_PID"
-echo "  Duration: ${DURATION_MIN} minutes"
+echo "  Duration: ${DURATION_MIN} min load + ${COOLDOWN_MIN} min cool-down"
 echo "  Press Ctrl+C to stop early"
 echo ""
 

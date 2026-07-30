@@ -39,7 +39,20 @@ Fully non-interactive.
 ./scripts/reproduce_leak.sh                # 30 min, 100% bad archives, max speed
 ./scripts/reproduce_leak.sh 120            # 2 hours
 ./scripts/reproduce_leak.sh 120 0.5        # 2 hours, 50% bad archives
+./scripts/reproduce_leak.sh 10 0.3 --memray  # 10 min with memray profiling
 ```
+
+**Options:**
+
+| Flag             | Default  | Description                                          |
+|------------------|----------|------------------------------------------------------|
+| `--no-molodec`   | off      | Use self-contained archives instead of molodec        |
+| `--parallel N`   | `3`      | Number of parallel upload workers                     |
+| `--delay N`      | `0`      | Seconds between uploads per worker                    |
+| `--burst`        | off      | Burst mode: 10 min send + 1 min break cycles          |
+| `--cooldown N`   | `5`      | Minutes of idle monitoring after load stops            |
+| `--memray`       | off      | Profile the app with memray (see below)                |
+| `--url URL`      | `http://localhost:8000/api/ingress/v1/upload` | Upload endpoint |
 
 Press `Ctrl+C` to stop early — it still prints the summary and stops containers.
 
@@ -134,6 +147,35 @@ monitoring_20260716_143000/
 ├── insights-postgres_process_memory.csv
 ├── insights-postgres_disk_usage.csv
 └── SUMMARY.txt
+```
+
+## Memray Profiling
+
+When `--memray` is passed to `reproduce_leak.sh`, the script:
+
+1. Starts the compose stack normally and waits for it to be ready
+2. Installs memray inside the running container (`pip install memray`)
+3. Restarts the app under `memray run` (wrapping uvicorn, without `--reload`)
+4. Runs the normal warm-up, monitoring, and load generation phases
+5. On exit, copies the memray profile out and generates a flamegraph
+
+After the run, the output directory will contain:
+
+```
+monitoring_20260729_143000/
+├── ...                          # normal monitoring CSVs
+├── memray-profile.bin           # raw memray profile
+└── memray-flamegraph.html       # open in browser
+```
+
+To generate the flamegraph, memray must also be installed locally
+(`pip install memray`). If it's not available, the `.bin` file is still
+extracted and can be processed later:
+
+```bash
+python3 -m memray flamegraph monitoring_*/memray-profile.bin -o flamegraph.html
+python3 -m memray stats monitoring_*/memray-profile.bin
+python3 -m memray tree monitoring_*/memray-profile.bin
 ```
 
 ## Interpreting Results
