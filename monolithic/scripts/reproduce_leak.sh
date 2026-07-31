@@ -30,6 +30,7 @@ Options:
   --burst         Burst mode: 10 min send + 1 min break cycles
   --cooldown N    Minutes of idle monitoring after load stops (default: 5)
   --memray        Profile the app with memray (installs in container, wraps uvicorn)
+  --keep          Keep containers running after the test finishes
   --url URL       Upload endpoint (default: http://localhost:8000/api/ingress/v1/upload)
   -h, --help      Show this help
 
@@ -51,6 +52,7 @@ Examples:
   ./reproduce_leak.sh 60 0 --burst           # burst mode
   ./reproduce_leak.sh 30 0 --cooldown 10     # 10 min cool-down
   ./reproduce_leak.sh 10 0.3 --memray        # 10 min with memray profiling
+  ./reproduce_leak.sh 30 0 --keep            # keep containers running after test
 
 Press Ctrl+C to stop early — summary is still printed.
 EOF
@@ -68,6 +70,7 @@ BURST=""
 COOLDOWN_MIN="5"
 UPLOAD_URL=""
 USE_MEMRAY=""
+KEEP_CONTAINERS=""
 POSITIONAL=()
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -77,6 +80,7 @@ while [ $# -gt 0 ]; do
         --parallel)   PARALLEL="$2"; shift ;;
         --delay)      DELAY="$2"; shift ;;
         --memray)     USE_MEMRAY=1 ;;
+        --keep)       KEEP_CONTAINERS=1 ;;
         --url)        UPLOAD_URL="$2"; shift ;;
         --help|-h)    ;; # handled above
         *)            POSITIONAL+=("$1") ;;
@@ -182,8 +186,13 @@ cleanup() {
         fi
     fi
 
-    echo "Stopping containers..."
-    podman compose -f "$COMPOSE_DIR/docker-compose.yml" down 2>/dev/null || true
+    if [ -n "$KEEP_CONTAINERS" ]; then
+        echo "Containers kept running (--keep). Stop manually with:"
+        echo "  podman compose -f $COMPOSE_DIR/docker-compose.yml down"
+    else
+        echo "Stopping containers..."
+        podman compose -f "$COMPOSE_DIR/docker-compose.yml" down 2>/dev/null || true
+    fi
 }
 
 trap cleanup EXIT INT TERM

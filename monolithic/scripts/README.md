@@ -52,6 +52,7 @@ Fully non-interactive.
 | `--burst`        | off      | Burst mode: 10 min send + 1 min break cycles          |
 | `--cooldown N`   | `5`      | Minutes of idle monitoring after load stops            |
 | `--memray`       | off      | Profile the app with memray (see below)                |
+| `--keep`         | off      | Keep containers running after the test finishes        |
 | `--url URL`      | `http://localhost:8000/api/ingress/v1/upload` | Upload endpoint |
 
 Press `Ctrl+C` to stop early — it still prints the summary and stops containers.
