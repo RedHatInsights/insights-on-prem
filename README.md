@@ -35,6 +35,7 @@ Insights on Premise aims to provide recommendations based on Insights archives i
   - [Hermetic Builds](#hermetic-builds)
     - [Regenerating requirements.txt / requirements-build.txt / rpms.in.yaml](#regenerating-requirementstxt--requirements-buildtxt--rpmsinyaml)
   - [Building and Pushing Multiarch Image](#building-and-pushing-multiarch-image)
+  - [License](#license)
 
 ## Deployment to ACM Cluster
 
@@ -421,3 +422,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
   -t quay.io/NAMESPACE/IMAGE:TAG \
   --push .
 ```
+
+## License
+
+This project is licensed under the AGPL v3 - see the [LICENSE](LICENSE) file for details.
