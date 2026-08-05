@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -9,7 +10,6 @@ from app.config import AppConfig
 from app.exceptions import ValidationError
 from app.schemas import UploadResponse
 from app.services.upload_service import UploadService
-from fastapi import BackgroundTasks
 
 
 @pytest.fixture
@@ -38,12 +38,19 @@ def test_config():
 
 
 @pytest.fixture
-def upload_service(mock_processor_service, test_config, mock_session_factory):
+def mock_executor():
+    """Create a mock ThreadPoolExecutor."""
+    return Mock(spec=ThreadPoolExecutor)
+
+
+@pytest.fixture
+def upload_service(mock_processor_service, test_config, mock_session_factory, mock_executor):
     """Create UploadService instance with mocks."""
     return UploadService(
         processor_service=mock_processor_service,
         config=test_config,
         session_factory=mock_session_factory,
+        executor=mock_executor,
     )
 
 
@@ -55,9 +62,7 @@ async def test_process_upload_success(upload_service):
     mock_file.filename = "test.tar.gz"
     mock_file.read = AsyncMock(side_effect=[test_data, b""])
 
-    background_tasks = BackgroundTasks()
-
-    result = await upload_service.process_upload(background_tasks, mock_file, "req-123")
+    result = await upload_service.process_upload(mock_file, "req-123")
 
     assert isinstance(result, UploadResponse)
     assert result.request_id == "req-123"
@@ -65,19 +70,17 @@ async def test_process_upload_success(upload_service):
 
 
 @pytest.mark.asyncio
-async def test_process_upload_schedules_background_task(upload_service):
-    """Test that processing is scheduled as a background task."""
+async def test_process_upload_submits_to_executor(upload_service, mock_executor):
+    """Test that processing is submitted to the executor."""
     test_data = b"test archive"
     mock_file = Mock()
     mock_file.filename = "test.tar.gz"
     mock_file.read = AsyncMock(side_effect=[test_data, b""])
 
-    background_tasks = Mock(spec=BackgroundTasks)
+    await upload_service.process_upload(mock_file, "req-123")
 
-    await upload_service.process_upload(background_tasks, mock_file, "req-123")
-
-    background_tasks.add_task.assert_called_once()
-    args = background_tasks.add_task.call_args
+    mock_executor.submit.assert_called_once()
+    args = mock_executor.submit.call_args
     assert args[0][0] == upload_service._process_in_background
     assert args[0][2] == "req-123"
 
@@ -88,10 +91,8 @@ async def test_process_upload_validation_error(upload_service):
     mock_file = Mock()
     mock_file.filename = "test.zip"  # Invalid format
 
-    background_tasks = BackgroundTasks()
-
     with pytest.raises(ValidationError):
-        await upload_service.process_upload(background_tasks, mock_file, "req-123")
+        await upload_service.process_upload(mock_file, "req-123")
 
 
 def test_process_in_background_success(

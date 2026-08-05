@@ -6,9 +6,10 @@ import logging
 import os
 import tempfile
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
-from fastapi import BackgroundTasks, UploadFile
+from fastapi import UploadFile
 from sqlalchemy.orm import sessionmaker
 
 from app.config import AppConfig
@@ -28,6 +29,7 @@ class UploadService:
         config: AppConfig,
         session_factory: sessionmaker,
         task_tracker=None,
+        executor: ThreadPoolExecutor | None = None,
     ):
         self.processor_service = processor_service
         self.config = config
@@ -39,6 +41,7 @@ class UploadService:
         # CPU-bound threads from truly parallelising. Controlled by MAX_WORKERS
         # env var (default 4).
         self._processing_semaphore = threading.Semaphore(config.max_workers)
+        self.executor = executor
 
     def _get_archive_suffix(self, file: UploadFile) -> str:
         suffix = ""
@@ -150,12 +153,11 @@ class UploadService:
                 self.task_tracker.finish()
 
     async def process_upload(
-        self, background_tasks: BackgroundTasks, file: UploadFile, request_id: str
+        self, file: UploadFile, request_id: str
     ) -> UploadResponse:
         """
         Validate and save upload, then schedule processing as a background task.
 
-        :param background_tasks: FastAPI BackgroundTasks
         :param file: Uploaded file
         :param request_id: Request ID
         :return: UploadResponse with accepted status
@@ -169,8 +171,7 @@ class UploadService:
         # Save to temp location
         temp_file_path, total_size = await self._save_to_temp(file, request_id)
 
-        # Schedule processing as background task
-        background_tasks.add_task(
+        self.executor.submit(
             self._process_in_background, temp_file_path, request_id
         )
 

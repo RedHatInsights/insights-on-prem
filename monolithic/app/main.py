@@ -7,12 +7,12 @@ import logging
 import os
 import ssl
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
 import uvicorn
 from fastapi import (
-    BackgroundTasks,
     Depends,
     FastAPI,
     File,
@@ -73,12 +73,15 @@ async def lifespan(app: FastAPI):
     load_insights_components(config)
 
     task_tracker = BackgroundTaskTracker()
+    # Single-thread executor to serialize archive processing and limit memory usage
+    executor = ThreadPoolExecutor(max_workers=1)
     app.state.processor_service = ProcessorService(config)
     app.state.upload_service = UploadService(
         app.state.processor_service,
         config,
         session_factory,
         task_tracker=task_tracker,
+        executor=executor,
     )
     app.state.content_service = ContentService(YAMLContentParser())
     app.state.report_service = ReportService(app.state.content_service)
@@ -99,6 +102,8 @@ async def lifespan(app: FastAPI):
             "Shutdown timeout: %d background tasks still running",
             task_tracker.active_count,
         )
+
+    executor.shutdown(wait=False)
 
     cleanup_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
@@ -173,14 +178,12 @@ async def health_check():
 async def upload_archive(
     request: Request,
     response: Response,
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),  # noqa: B008
 ):
     """
     Upload and process Red Hat Insights archive.
 
     :param file: Uploaded archive file (tar, tar.gz, or tgz format)
-    :param background_tasks: FastAPI background tasks
     :return: UploadResponse with accepted status
     :raises HTTPException: On validation errors
     """
@@ -189,9 +192,7 @@ async def upload_archive(
     request_id = str(uuid.uuid4())
 
     try:
-        upload_response = await upload_service.process_upload(
-            background_tasks, file, request_id
-        )
+        upload_response = await upload_service.process_upload(file, request_id)
         response.headers["x-rh-insights-request-id"] = request_id
         return upload_response
 
