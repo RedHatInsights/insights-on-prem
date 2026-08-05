@@ -154,20 +154,28 @@ class ProcessorService:
                 # Initialize broker
                 ctx, broker = initialize_broker(extraction.tmp_dir)
 
-                # Run components with formatter
-                output = StringIO()
-                with self.Formatter(broker, stream=output):
-                    dr.run_components(
-                        self.target_components, self.components_dict, broker=broker
-                    )
+                try:
+                    # Run components with formatter
+                    output = StringIO()
+                    with self.Formatter(broker, stream=output):
+                        dr.run_components(
+                            self.target_components, self.components_dict, broker=broker
+                        )
 
-                output.seek(0)
-                result = output.read()
+                    output.seek(0)
+                    result = output.read()
 
-                logger.info(f"Processing completed for cluster {cluster_id}")
-                logger.debug(f"Result length: {len(result)} chars")
+                    logger.info(f"Processing completed for cluster {cluster_id}")
+                    logger.debug(f"Result length: {len(result)} chars")
 
-                return cluster_id, result
+                    return cluster_id, result
+                finally:
+                    # Break circular references between broker exceptions
+                    # and call frames to prevent memory leaks (CCXDEV-16176).
+                    # The hasattr guard keeps compatibility with un-patched
+                    # insights-core that lacks Broker.cleanup().
+                    if hasattr(broker, 'cleanup'):
+                        broker.cleanup()
 
         except Exception as e:
             logger.error(f"insights-core processing failed: {e}", exc_info=True)

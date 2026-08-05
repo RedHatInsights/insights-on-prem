@@ -320,3 +320,65 @@ def test_process_archive_size_limit_exceeded(mock_extract, service_config, tmp_p
         pytest.raises(ProcessingError, match="Archive exceeds size limit"),
     ):
         service.process_archive(Mock(), "/fake/archive.tar.gz", REQUEST_ID)
+
+
+@patch("app.services.processor_service.extract")
+@patch("app.services.processor_service.initialize_broker")
+@patch("app.services.processor_service.dr")
+def test_process_with_insights_core_calls_broker_cleanup(
+    mock_dr, mock_init_broker, mock_extract, processor_service, tmp_path
+):
+    """Test that broker.cleanup() is called after processing to prevent memory leaks."""
+    mock_extraction = MagicMock()
+    mock_extraction.tmp_dir = str(tmp_path / "extraction")
+    mock_extract.return_value.__enter__.return_value = mock_extraction
+
+    config_dir = tmp_path / "extraction" / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "id").write_text("test-cluster-123")
+
+    mock_ctx = Mock()
+    mock_broker = Mock()
+    mock_init_broker.return_value = (mock_ctx, mock_broker)
+
+    mock_formatter = MagicMock()
+    processor_service.Formatter = mock_formatter
+
+    with patch("app.services.processor_service.StringIO") as mock_stringio:
+        mock_output = MagicMock()
+        mock_output.read.return_value = "{}"
+        mock_stringio.return_value = mock_output
+
+        processor_service.process_with_insights_core("/fake/archive.tar.gz")
+
+    mock_broker.cleanup.assert_called_once()
+
+
+@patch("app.services.processor_service.extract")
+@patch("app.services.processor_service.initialize_broker")
+@patch("app.services.processor_service.dr")
+def test_process_with_insights_core_calls_broker_cleanup_on_error(
+    mock_dr, mock_init_broker, mock_extract, processor_service, tmp_path
+):
+    """Test that broker.cleanup() is called even when processing raises."""
+    mock_extraction = MagicMock()
+    mock_extraction.tmp_dir = str(tmp_path / "extraction")
+    mock_extract.return_value.__enter__.return_value = mock_extraction
+
+    config_dir = tmp_path / "extraction" / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "id").write_text("test-cluster-123")
+
+    mock_ctx = Mock()
+    mock_broker = Mock()
+    mock_init_broker.return_value = (mock_ctx, mock_broker)
+
+    mock_dr.run_components.side_effect = RuntimeError("component failure")
+
+    mock_formatter = MagicMock()
+    processor_service.Formatter = mock_formatter
+
+    with pytest.raises(ProcessingError):
+        processor_service.process_with_insights_core("/fake/archive.tar.gz")
+
+    mock_broker.cleanup.assert_called_once()
