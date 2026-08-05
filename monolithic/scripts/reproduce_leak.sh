@@ -29,6 +29,7 @@ Options:
   --delay N       Seconds between uploads per worker (default: 0)
   --burst         Burst mode: 10 min send + 1 min break cycles
   --cooldown N    Minutes of idle monitoring after load stops (default: 5)
+  --max-exceptions-archive  Use max_exceptions_archive.tar for uploads
   --memray        Profile the app with memray (installs in container, wraps uvicorn)
   --keep          Keep containers running after the test finishes
   --url URL       Upload endpoint (default: http://localhost:8000/api/ingress/v1/upload)
@@ -71,6 +72,7 @@ COOLDOWN_MIN="5"
 UPLOAD_URL=""
 USE_MEMRAY=""
 KEEP_CONTAINERS=""
+MAX_EXCEPTIONS_ARCHIVE=""
 POSITIONAL=()
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -81,6 +83,7 @@ while [ $# -gt 0 ]; do
         --delay)      DELAY="$2"; shift ;;
         --memray)     USE_MEMRAY=1 ;;
         --keep)       KEEP_CONTAINERS=1 ;;
+        --max-exceptions-archive) MAX_EXCEPTIONS_ARCHIVE="$SCRIPT_DIR/max_exceptions_archive.tar" ;;
         --url)        UPLOAD_URL="$2"; shift ;;
         --help|-h)    ;; # handled above
         *)            POSITIONAL+=("$1") ;;
@@ -352,6 +355,7 @@ echo "=== Warm-up (uploading 3 archives to load insights-core components) ==="
     --bad-ratio "$BAD_RATIO" \
     --parallel 1 \
     $( [ -n "$NO_MOLODEC" ] && echo "--no-molodec" ) \
+    $( [ -n "$MAX_EXCEPTIONS_ARCHIVE" ] && echo "--max-exceptions-archive $MAX_EXCEPTIONS_ARCHIVE" ) \
     $( [ -n "$UPLOAD_URL" ] && echo "--url $UPLOAD_URL" ) &
 WARMUP_PID=$!
 
@@ -400,7 +404,9 @@ if [ -n "$BURST" ]; then
 else
     echo "  Mode:     continuous"
 fi
-if [ -n "$NO_MOLODEC" ]; then
+if [ -n "$MAX_EXCEPTIONS_ARCHIVE" ]; then
+    echo "  Archives: max-exceptions ($MAX_EXCEPTIONS_ARCHIVE)"
+elif [ -n "$NO_MOLODEC" ]; then
     echo "  Archives: self-contained"
 else
     echo "  Archives: molodec (realistic OCP)"
@@ -414,8 +420,9 @@ SEND_ARGS=(
 [ -n "$PARALLEL" ]   && SEND_ARGS+=(--parallel "$PARALLEL")
 [ -n "$DELAY" ]      && SEND_ARGS+=(--delay "$DELAY")
 [ -n "$BURST" ]      && SEND_ARGS+=(--burst)
-[ -n "$NO_MOLODEC" ] && SEND_ARGS+=(--no-molodec)
-[ -n "$UPLOAD_URL" ] && SEND_ARGS+=(--url "$UPLOAD_URL")
+[ -n "$NO_MOLODEC" ]            && SEND_ARGS+=(--no-molodec)
+[ -n "$MAX_EXCEPTIONS_ARCHIVE" ] && SEND_ARGS+=(--max-exceptions-archive "$MAX_EXCEPTIONS_ARCHIVE")
+[ -n "$UPLOAD_URL" ]            && SEND_ARGS+=(--url "$UPLOAD_URL")
 
 "$PYTHON" "$SCRIPT_DIR/send_archives.py" "${SEND_ARGS[@]}" &
 SEND_PID=$!

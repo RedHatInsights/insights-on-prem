@@ -99,9 +99,20 @@ while true; do
         echo "${TIMESTAMP},${ELAPSED_MIN},${CPU_PERC},${MEM_USAGE},${MEM_LIMIT},${MEM_PERC}" \
             >> "$OUTPUT_DIR/${container}_podman_stats.csv"
 
-        # /proc/1/status inside container
+        # Find the process with the largest VmRSS (the actual worker, not
+        # a uvicorn --reload master or a QEMU wrapper).
         PROC_MEM=$(podman exec "$container" sh -c '
-            grep -E "VmSize|VmRSS|VmData|VmStk" /proc/1/status 2>/dev/null \
+            TARGET_PID=1
+            MAX_RSS=0
+            for p in /proc/[0-9]*/status; do
+                pid=${p#/proc/}; pid=${pid%/status}
+                rss=$(grep VmRSS "$p" 2>/dev/null | awk "{print \$2}")
+                if [ -n "$rss" ] && [ "$rss" -gt "$MAX_RSS" ] 2>/dev/null; then
+                    MAX_RSS=$rss
+                    TARGET_PID=$pid
+                fi
+            done
+            grep -E "VmSize|VmRSS|VmData|VmStk" "/proc/$TARGET_PID/status" 2>/dev/null \
                 | awk "{print \$2}" | tr "\n" ","
         ' 2>/dev/null) || true
 

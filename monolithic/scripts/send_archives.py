@@ -148,6 +148,18 @@ def make_molodec_archive(cluster_id, tmpdir):
     return path
 
 
+def make_max_exceptions_archive(cluster_id, tmpdir, source_tar):
+    """Copy the max-exceptions archive with a fresh cluster ID."""
+    path = os.path.join(tmpdir, f"{cluster_id}.tar")
+    shutil.copy2(source_tar, path)
+    with tarfile.open(path, mode="a") as tar:
+        data = cluster_id.encode("utf-8")
+        info = tarfile.TarInfo(name="config/id")
+        info.size = len(data)
+        tar.addfile(info, BytesIO(data))
+    return path
+
+
 def upload_archive(url, file_path):
     """Upload archive file via curl (reliable multipart)."""
     result = subprocess.run(
@@ -358,12 +370,23 @@ def main():
         "--no-molodec", action="store_true",
         help="Use self-contained archives instead of molodec",
     )
+    parser.add_argument(
+        "--max-exceptions-archive", type=str, default=None,
+        help="Path to max_exceptions_archive.tar to use for uploads",
+    )
     args = parser.parse_args()
 
     if args.no_molodec:
         args.use_molodec = False
 
-    if args.use_molodec:
+    if args.max_exceptions_archive:
+        source_tar = args.max_exceptions_archive
+        if not os.path.isfile(source_tar):
+            print(f"ERROR: archive not found: {source_tar}", file=sys.stderr)
+            sys.exit(1)
+        make_fn = lambda cid, tmpdir: make_max_exceptions_archive(cid, tmpdir, source_tar)
+        print(f"Using max-exceptions archive: {source_tar}")
+    elif args.use_molodec:
         if shutil.which("molodec") is None:
             print(
                 "ERROR: --use-molodec requires molodec CLI.\n"

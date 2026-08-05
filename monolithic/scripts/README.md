@@ -51,6 +51,7 @@ Fully non-interactive.
 | `--delay N`      | `0`      | Seconds between uploads per worker                    |
 | `--burst`        | off      | Burst mode: 10 min send + 1 min break cycles          |
 | `--cooldown N`   | `5`      | Minutes of idle monitoring after load stops            |
+| `--max-exceptions-archive` | off | Use `max_exceptions_archive.tar` for uploads (max exceptions per archive) |
 | `--memray`       | off      | Profile the app with memray (see below)                |
 | `--keep`         | off      | Keep containers running after the test finishes        |
 | `--url URL`      | `http://localhost:8000/api/ingress/v1/upload` | Upload endpoint |
@@ -104,6 +105,7 @@ python3 scripts/send_archives.py --use-molodec --duration 60
 | `--burst`        | off      | Burst mode: 10 min send + 1 min break cycles         |
 | `--use-molodec`  | on       | Use molodec for archive generation (default)          |
 | `--no-molodec`   | off      | Use self-contained archives instead of molodec        |
+| `--max-exceptions-archive PATH` | off | Use a static archive file with max exceptions |
 
 **Archive types:**
 
@@ -114,6 +116,9 @@ python3 scripts/send_archives.py --use-molodec --duration 60
   path where the traceback circular reference leak occurs.
 - **Molodec** (`--use-molodec`) — realistic OCP archives with rule hits.
   Already installed in the venv by `setup_venv.sh`.
+- **Max-exceptions** (`--max-exceptions-archive`) — a static archive designed
+  to trigger the maximum number of exceptions per upload. Each upload gets a
+  random cluster ID so the app treats them as distinct clusters.
 
 ### `monitor.sh`
 
