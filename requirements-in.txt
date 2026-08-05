@@ -15,7 +15,7 @@ alembic>=1.13.0
 # Lock version as a workaround to PackageWithCorruptLockfileRejected: cachecontrol==0.14.4
 # pulls in uv-build as a build backend, whose sdist ships a Cargo.lock that doesn't match
 # its Cargo.toml, which Hermeto's `cargo vendor --locked` rejects (same fix as rules-containers).
-cachecontrol==0.14.3
+cachecontrol==0.14.4
 
 # HTTP client
 httpx>=0.25.0

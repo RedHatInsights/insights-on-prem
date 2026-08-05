@@ -6,20 +6,20 @@
 #
 alembic==1.18.5
     # via -r requirements-in.txt
-annotated-doc==0.0.4
+annotated-doc==0.0.5
     # via fastapi
-annotated-types==0.7.0
+annotated-types==0.8.0
     # via pydantic
 anyio==4.14.2
     # via
     #   httpx
     #   starlette
     #   watchfiles
-cachecontrol[filecache,redis]==0.14.3
+cachecontrol[filecache,redis]==0.14.4
     # via
     #   -r requirements-in.txt
     #   insights-core
-certifi==2026.6.17
+certifi==2026.7.22
     # via
     #   httpcore
     #   httpx
@@ -28,15 +28,15 @@ charset-normalizer==3.4.9
     # via requests
 click==8.4.2
     # via uvicorn
-coverage[toml]==7.15.2
+coverage[toml]==7.15.3
     # via pytest-cov
 defusedxml==0.7.1
     # via insights-core
-fastapi==0.139.2
+fastapi==0.141.1
     # via -r requirements-in.txt
-filelock==3.31.2
+filelock==3.32.2
     # via cachecontrol
-greenlet==3.5.3
+greenlet==3.5.4
     # via sqlalchemy
 h11==0.16.0
     # via
@@ -55,7 +55,7 @@ idna==3.18
     #   requests
 iniconfig==2.3.0
     # via pytest
-insights-core==3.7.7
+insights-core==3.8.0
     # via -r requirements-in.txt
 jinja2==3.1.6
     # via insights-core
@@ -81,7 +81,7 @@ pydantic==2.13.4
     # via
     #   -r requirements-in.txt
     #   fastapi
-pydantic-core==2.46.4
+pydantic-core==2.47.0
     # via pydantic
 pygments==2.20.0
     # via pytest
@@ -100,7 +100,7 @@ pyyaml==6.0.3
     #   -r requirements-in.txt
     #   insights-core
     #   uvicorn
-redis==8.0.1
+redis==8.1.0
     # via
     #   cachecontrol
     #   insights-core
@@ -132,11 +132,11 @@ typing-inspection==0.4.2
     #   pydantic
 urllib3==2.7.0
     # via requests
-uvicorn[standard]==0.51.0
+uvicorn[standard]==0.52.1
     # via -r requirements-in.txt
 uvloop==0.22.1
     # via uvicorn
 watchfiles==1.2.0
     # via uvicorn
-websockets==16.1.1
+websockets==17.0.1
     # via uvicorn
