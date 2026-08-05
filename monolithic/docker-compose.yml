@@ -21,6 +21,8 @@ services:
       - insights-network
 
   app:
+    #image: localhost/insights-on-prem-monolithic:latest
+    #image: localhost/monolithic_app:latest_more_ins_fixes
     build:
       context: .
       dockerfile: Dockerfile
@@ -41,11 +43,16 @@ services:
       - ./tests:/app/tests
       - ./config.yml:/app/config.yml
       - temp_uploads:/tmp/insights-uploads
+      # Patched upstream libraries for memory leak testing
+      - /Users/mzibrick/Projects/RH-ccx/insights-core/insights:/opt/venv/lib64/python3.12/site-packages/insights
+      - /Users/mzibrick/Projects/RH-ccx/ccx-ocp-core/ccx_ocp_core:/opt/venv/lib64/python3.12/site-packages/ccx_ocp_core
     depends_on:
       postgres:
         condition: service_healthy
     networks:
       - insights-network
+    mem_limit: 4g
+    cpus: "1.0"
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 volumes:

@@ -10,7 +10,7 @@ WORKDIR /app
 
 COPY requirements-build.txt .
 # hadolint ignore=DL3041  # We prefer to use latest versions of dnf pkgs
-RUN microdnf install --nodocs -y sqlite postgresql-devel && \
+RUN microdnf install --nodocs -y sqlite postgresql-devel git && \
     /opt/venv/bin/pip install --no-cache-dir -U -r requirements-build.txt && \
     microdnf clean all && \
     mkdir -p /tmp/insights-uploads && chmod 777 /tmp/insights-uploads

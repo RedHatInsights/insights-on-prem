@@ -14,6 +14,8 @@ alembic>=1.13.0
 
 # Insights-core and CCX packages
 insights-core>=3.2.26
+#insights-core @ git+https://github.com/matysek/insights-core.git@mzibrick-ccxdev15098-memleak
+#insights-core @ git+https://github.com/matysek/insights-core.git@mzibrick-ccxdev15098-more-fixes
 ccx-rules-ocp>=2026.02.13
 
 # HTTP client
