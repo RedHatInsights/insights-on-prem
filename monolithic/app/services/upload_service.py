@@ -1,9 +1,11 @@
 """Service for upload orchestration and validation."""
 
 import contextlib
+import gc
 import logging
 import os
 import tempfile
+import threading
 from datetime import datetime, timezone
 
 from fastapi import BackgroundTasks, UploadFile
@@ -31,6 +33,12 @@ class UploadService:
         self.config = config
         self.session_factory = session_factory
         self.task_tracker = task_tracker
+        # Limit concurrent insights-core processing to avoid excessive memory
+        # usage. Each archive extraction + analysis holds significant memory
+        # (unpacked archive, broker, component graph), and the GIL prevents
+        # CPU-bound threads from truly parallelising. Controlled by MAX_WORKERS
+        # env var (default 4).
+        self._processing_semaphore = threading.Semaphore(config.max_workers)
 
     def _get_archive_suffix(self, file: UploadFile) -> str:
         suffix = ""
@@ -113,22 +121,24 @@ class UploadService:
         if self.task_tracker:
             self.task_tracker.start()
         try:
-            db = self.session_factory()
-            try:
-                cluster_id, rules_count = self.processor_service.process_archive(
-                    db, temp_file_path, request_id
-                )
-                logger.info(
-                    f"Request {request_id}: Successfully processed cluster {cluster_id} "
-                    f"with {rules_count} rules"
-                )
-            except Exception as e:
-                logger.error(
-                    f"Request {request_id}: Background processing failed: {e}",
-                    exc_info=True,
-                )
-            finally:
-                db.close()
+            with self._processing_semaphore:
+                db = self.session_factory()
+                try:
+                    cluster_id, rules_count = self.processor_service.process_archive(
+                        db, temp_file_path, request_id
+                    )
+                    logger.info(
+                        f"Request {request_id}: Successfully processed cluster {cluster_id} "
+                        f"with {rules_count} rules"
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"Request {request_id}: Background processing failed: {e}",
+                        exc_info=True,
+                    )
+                finally:
+                    db.close()
+                    gc.collect()
         finally:
             if os.path.exists(temp_file_path):
                 try:

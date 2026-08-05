@@ -38,6 +38,8 @@ class AppConfig:
     plugin_packages: list[str] = field(default_factory=list)
     plugin_configs: list[dict] = field(default_factory=list)
 
+    max_workers: int = 4
+
     mtls_enabled: bool = False
 
     @property
@@ -65,6 +67,7 @@ _ENV_OVERRIDES = {
     "THANOS_QUERY_LOOKBACK_MINUTES": ("thanos_query_lookback_minutes", int),
     "DB_RETENTION_HOURS": ("db_retention_hours", int),
     "DB_CLEANUP_INTERVAL_MINUTES": ("db_cleanup_interval_minutes", int),
+    "MAX_WORKERS": ("max_workers", int),
     "MTLS_ENABLED": ("mtls_enabled", lambda v: v.lower() in ("true", "1", "yes")),
 }
 

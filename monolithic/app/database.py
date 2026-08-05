@@ -11,17 +11,19 @@ from sqlalchemy.orm import Session, sessionmaker
 Base = declarative_base()
 
 
-def init_db(database_url: str):
+def init_db(database_url: str, max_workers: int = 4):
     """Create engine, session factory, and all tables.
 
     :param database_url: PostgreSQL connection URL
+    :param max_workers: Max concurrent archive processing threads
     :return: Tuple of (engine, session_factory)
     """
     engine = create_engine(
         database_url,
         pool_pre_ping=True,
-        pool_size=10,
-        max_overflow=20,
+        pool_size=max_workers + 1,
+        max_overflow=max_workers,
+        pool_recycle=3600,
     )
     session_factory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     Base.metadata.create_all(bind=engine)
