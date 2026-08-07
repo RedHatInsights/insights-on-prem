@@ -390,6 +390,11 @@ The Dockerfile is built hermetically by Konflux (network access disabled during 
 To add or upgrade a Python dependency, edit `requirements-in.txt`, then regenerate the pinned files. **Always do this inside a `linux/amd64` Python 3.12 container** (matching the base image and Konflux's build platform) — running `pip-compile` on macOS/arm64 silently drops dependencies whose markers only match `x86_64`/`aarch64` (e.g. SQLAlchemy's `greenlet`), since pip-compile resolves environment markers against the machine it runs on, not the target platform:
 
 ```bash
+# Prefer the helper script (also used by ccx-rules-releaser):
+podman run --rm --platform linux/amd64 -v "$(pwd):/work:Z" -w /work python:3.12-slim \
+  bash scripts/update_requirements.sh
+
+# Equivalent manual commands:
 podman run --rm --platform linux/amd64 -v "$(pwd):/work:Z" -w /work python:3.12-slim bash -c '
   pip install -q pip-tools pybuild-deps
   pip-compile --output-file=requirements.txt requirements-in.txt
