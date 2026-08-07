@@ -142,6 +142,11 @@ class UploadService:
                 finally:
                     db.close()
                     gc.collect()
+                    try:
+                        import ctypes
+                        ctypes.CDLL("libc.so.6").malloc_trim(0)
+                    except Exception:
+                        pass
         finally:
             if os.path.exists(temp_file_path):
                 try:
