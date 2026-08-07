@@ -396,6 +396,7 @@ podman run --rm --platform linux/amd64 -v "$(pwd):/work:Z" -w /work python:3.12-
 
 # Equivalent manual commands:
 podman run --rm --platform linux/amd64 -v "$(pwd):/work:Z" -w /work python:3.12-slim bash -c '
+  set -euo pipefail
   pip install -q pip-tools pybuild-deps
   pip-compile --output-file=requirements.txt requirements-in.txt
   pybuild-deps compile --generate-hashes --output-file=requirements-build.txt requirements.txt

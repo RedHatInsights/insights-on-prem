@@ -117,8 +117,8 @@ else
             exit 1
         fi
     fi
-    SUB_MGR_CMD="subscription-manager register --username=\${RH_USER} --password=\${PASSWORD}"
-    SKOPEO_LOGIN_CMD="skopeo login registry.redhat.io -u \$RH_USER -p \$PASSWORD"
+    SUB_MGR_CMD="subscription-manager register --username=\"\${RH_USER}\" --password=\"\${PASSWORD}\""
+    SKOPEO_LOGIN_CMD="skopeo login registry.redhat.io -u \"\$RH_USER\" -p \"\$PASSWORD\""
 fi
 
 # Require docker or podman
