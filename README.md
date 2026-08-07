@@ -22,6 +22,11 @@ Insights on Premise aims to provide recommendations based on Insights archives i
   - [Triggering Sample Results](#triggering-sample-results)
     - [Upgrade risk predictions](#upgrade-risk-predictions)
     - [Cluster recommendations](#cluster-recommendations)
+  - [Architecture](#architecture)
+    - [Data Flow](#data-flow)
+    - [Security](#security)
+      - [Certificate Management](#certificate-management)
+      - [Network Policies](#network-policies)
   - [Database Access](#database-access)
   - [API Endpoints](#api-endpoints)
     - [Upload Archive](#upload-archive)
@@ -261,7 +266,7 @@ oc get policyreport --all-namespaces
 
 After that you should be able to see at least one policyreport for the `local-cluster` (that is, for the ACM hub):
 
-```
+```text
 NAMESPACE       NAME                         PASS   FAIL   WARN   ERROR   SKIP   AGE
 local-cluster   local-cluster-policyreport   0      1      0      0       0      4m
 ```
@@ -271,6 +276,50 @@ To clean up the changes, run:
 ```bash
 oc delete validatingwebhookconfiguration insights-test-webhook
 ```
+
+## Architecture
+
+![Insights on Prem - Architecture diagram](docs/insights-on-prem-architecture.svg)
+
+The system consists of hub-side components that process Insights data and per-cluster HAProxy instances that route traffic from managed clusters to the hub.
+
+### Data Flow
+
+On each managed cluster, the **Insights Operator** (in `openshift-insights`) collects diagnostic archives and sends them to a local **HAProxy** instance (in `insights-on-prem`). HAProxy terminates the local TLS connection and forwards the archive to the hub's **Insights on Prem** service through the **passthrough Route**, authenticating with a client certificate signed by the hub's client CA.
+
+On the hub, Insights on Prem validates the client certificate, processes the archive using [insights-core](https://github.com/RedHatInsights/insights-core) rules, and stores results in **PostgreSQL**. The **Insights Client** (in `open-cluster-management`) then polls Insights on Prem for processed results and creates `PolicyReport` custom resources, which surface as **cluster recommendations** in the ACM console.
+
+For **upgrade risk predictions**, the ACM console queries Insights on Prem, which evaluates alerts and operator conditions retrieved from **Thanos** (in `open-cluster-management-observability`, deployed by the Multicluster Observability Operator).
+
+HAProxy is deployed as an ACM managed cluster addon on every managed cluster, including the hub itself (which is self-managed). On the hub, HAProxy also serves as the local endpoint for the ACM console and Insights Client.
+
+> **Note:** The current deployment includes temporary workarounds that deviate from the diagram above:
+>
+> - A CONNECT proxy in `open-cluster-management` works around an ACM console limitation with service CA trust (to be removed by [#209](https://github.com/RedHatInsights/lightspeed-advisor-on-premise-ocp/pull/209) once the console fix is backported).
+> - A cluster-wide Proxy patch distributes the service CA to the Insights Operator until it natively supports a CA certificate field in its ConfigMap (to be removed by [#204](https://github.com/RedHatInsights/lightspeed-advisor-on-premise-ocp/pull/204)).
+> - HAProxy is currently deployed in the `openshift-insights` namespace on managed clusters; it will be moved to `insights-on-prem` since it is not used exclusively by the Insights Operator.
+
+### Security
+
+#### Certificate Management
+
+The deployment installs the **cert-manager Operator** and creates cert-manager issuers that manage the server-side TLS certificates. These certificates are distributed via ACM Policies. Client certificates are issued separately through ACM's CustomSigner addon registration:
+
+| Certificate | Issued by | Scope | Purpose |
+| --- | --- | --- | --- |
+| Server CA | Self-signed bootstrap `ClusterIssuer` | Hub | Signs the server leaf certificate for the Insights on Prem service |
+| Client CA | Self-signed bootstrap `ClusterIssuer` | Hub | Referenced by ACM's CustomSigner to sign client certificates for managed clusters |
+| Server leaf cert | Namespaced `Issuer` (backed by server CA) | Hub | Used by Insights on Prem for mTLS; includes the Route hostname as a SAN |
+| Service-serving cert | [OpenShift service serving certificate](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/security_and_compliance/configuring-certificates#add-service-certificate_service-serving-certificate) (via `service.beta.openshift.io/serving-cert-secret-name` annotation) | Each managed cluster | Used by HAProxy to accept local connections from the Insights Operator |
+| Client cert | ACM CustomSigner (backed by client CA) | Each managed cluster | Used by HAProxy to authenticate to the hub |
+
+cert-manager automatically renews the server-side certificates before expiry. When the server leaf certificate is renewed, a ConfigurationPolicy watches the certificate's hash and patches the Deployment annotation to trigger a rolling restart. On managed clusters, HAProxy detects certificate changes via a liveness probe that compares certificate checksums, causing the pod to restart and load the new certificates.
+
+#### Network Policies
+
+Insights on Prem authenticates clients via mTLS client certificate verification. Since HAProxy is the only component that obtains a client certificate, it is the sole authorized client of the service. HAProxy itself is not exposed outside the cluster, but NetworkPolicies are needed to prevent unintended in-cluster traffic from reaching it.
+
+NetworkPolicies ([#252](https://github.com/RedHatInsights/lightspeed-advisor-on-premise-ocp/pull/252)) will restrict ingress to HAProxy to only its expected consumers. On the hub, HAProxy can be reached by the Insights Operator, Insights Client, and the ACM console. On all other managed clusters, only the Insights Operator is allowed.
 
 ## Database Access
 
