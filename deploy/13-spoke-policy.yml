@@ -147,6 +147,38 @@ spec:
             {{- end }}
 
 
+    # --- NetworkPolicy: only insights-operator can reach the proxy ---
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: insights-operator-proxy-netpol
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: mustonlyhave
+              objectDefinition:
+                apiVersion: networking.k8s.io/v1
+                kind: NetworkPolicy
+                metadata:
+                  name: insights-operator-proxy
+                  namespace: openshift-insights
+                spec:
+                  podSelector:
+                    matchLabels:
+                      app: insights-operator-proxy
+                  policyTypes:
+                    - Ingress
+                  ingress:
+                    - from:
+                        - podSelector:
+                            matchLabels:
+                              app: insights-operator
+                      ports:
+                        - protocol: TCP
+                          port: 8443
+
     # --- Insights Operator configuration ---
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
