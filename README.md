@@ -86,15 +86,15 @@ The postgres password is stored in the secret `insights-postgres` in the `insigh
 
 The application is configured via environment variables set on the `insights-on-prem` deployment in the `insights-on-prem` namespace. The following variables can be tuned after deployment:
 
-| Variable | Default | Description |
-| -------- | ------- | ----------- |
-| `DB_RETENTION_HOURS` | `24` | How long to keep processed records in the database before automatic cleanup |
-| `DB_CLEANUP_INTERVAL_MINUTES` | `60` | How often the background cleanup task runs (in minutes) |
-| `MAX_FILE_SIZE` | `104857600` (100 MB) | Maximum uploaded archive file size in bytes |
-| `THANOS_URL` | `https://rbac-query-proxy.open-cluster-management-observability.svc.cluster.local:8443` | Thanos query endpoint URL (only relevant if MCO is deployed) |
-| `THANOS_QUERY_TIMEOUT_SECONDS` | `10` | Timeout for Thanos queries |
-| `THANOS_QUERY_LOOKBACK_MINUTES` | `60` | How far back to look when querying Thanos metrics |
-| `MTLS_ENABLED` | `true` (in-cluster) | Whether the server uses mTLS on port 8443 instead of plain HTTP on 8000 |
+| Variable                        | Default                                                                                 | Description                                                                 |
+| ------------------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `DB_RETENTION_HOURS`            | `24`                                                                                    | How long to keep processed records in the database before automatic cleanup |
+| `DB_CLEANUP_INTERVAL_MINUTES`   | `60`                                                                                    | How often the background cleanup task runs (in minutes)                     |
+| `MAX_FILE_SIZE`                 | `104857600` (100 MB)                                                                    | Maximum uploaded archive file size in bytes                                 |
+| `THANOS_URL`                    | `https://rbac-query-proxy.open-cluster-management-observability.svc.cluster.local:8443` | Thanos query endpoint URL (only relevant if MCO is deployed)                |
+| `THANOS_QUERY_TIMEOUT_SECONDS`  | `10`                                                                                    | Timeout for Thanos queries                                                  |
+| `THANOS_QUERY_LOOKBACK_MINUTES` | `60`                                                                                    | How far back to look when querying Thanos metrics                           |
+| `MTLS_ENABLED`                  | `true` (in-cluster)                                                                     | Whether the server uses mTLS on port 8443 instead of plain HTTP on 8000     |
 
 Database connection is configured through the `insights-postgres` secret (see [Secrets](#secrets) above). The variables `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` are all read from that secret in the default deployment manifests.
 
@@ -137,12 +137,12 @@ https://<CLUSTER_CONSOLE_URL>/multicloud/home/overview
 
 The Insights section of that page has four panels:
 
-| Panel | Depends on Insights on Prem | Depends on MCO |
-| ------- | :---------------------------: | :---------------: |
-| Cluster recommendations | Yes | No |
-| Update risk predictions | Yes | Yes |
-| Alerts | No | Yes |
-| Failing operators | No | Yes |
+| Panel                   | Depends on Insights on Prem | Depends on MCO |
+| ----------------------- | :-------------------------: | :------------: |
+| Cluster recommendations |             Yes             |       No       |
+| Update risk predictions |             Yes             |      Yes       |
+| Alerts                  |             No              |      Yes       |
+| Failing operators       |             No              |      Yes       |
 
 **Cluster recommendations** are based on `PolicyReport` custom resources created by `insights-client` in each managed cluster's namespace. **Update risk predictions** are served by Insights on Prem, but rely on metrics collected by MCO into Thanos. **Alerts** and **Failing operators** are read directly from Thanos by the ACM console and do not involve Insights on Prem at all.
 
@@ -439,7 +439,13 @@ The Dockerfile is built hermetically by Konflux (network access disabled during 
 To add or upgrade a Python dependency, edit `requirements-in.txt`, then regenerate the pinned files. **Always do this inside a `linux/amd64` Python 3.12 container** (matching the base image and Konflux's build platform) — running `pip-compile` on macOS/arm64 silently drops dependencies whose markers only match `x86_64`/`aarch64` (e.g. SQLAlchemy's `greenlet`), since pip-compile resolves environment markers against the machine it runs on, not the target platform:
 
 ```bash
+# Prefer the helper script (also used by ccx-rules-releaser):
+podman run --rm --platform linux/amd64 -v "$(pwd):/work:Z" -w /work python:3.12-slim \
+  bash scripts/update_requirements.sh
+
+# Equivalent manual commands:
 podman run --rm --platform linux/amd64 -v "$(pwd):/work:Z" -w /work python:3.12-slim bash -c '
+  set -euo pipefail
   pip install -q pip-tools pybuild-deps
   pip-compile --output-file=requirements.txt requirements-in.txt
   pybuild-deps compile --generate-hashes --output-file=requirements-build.txt requirements.txt
@@ -447,6 +453,16 @@ podman run --rm --platform linux/amd64 -v "$(pwd):/work:Z" -w /work python:3.12-
 ```
 
 `requirements.txt` is the fully-pinned runtime lockfile; `requirements-build.txt` lists the build-backend sdists (e.g. `setuptools`, `cython`, `maturin`) Hermeto needs to prefetch so packages without prebuilt wheels can be built from source in the hermetic build.
+
+Updating rpms should be done using
+
+```bash
+RH_ORG_ID=... RH_ACTIVATION_KEY=... bash scripts/update_rpm_lockfile.sh
+# Or if you have a .dockerconfig.json file:
+RH_USER=... PASSWORD=... bash scripts/update_rpm_lockfile.sh
+```
+
+The `AUTH_MODE` is determined by whether `RH_ORG_ID`+`RH_ACTIVATION_KEY` are set. If they are set, the `AUTH_MODE` is `activationkey`. If they are not set, the `AUTH_MODE` is `password`. The `activationkey` mode requires a `.dockerconfig.json` file in the script directory.
 
 Some RPMs (e.g. `postgresql-devel`) are only available on the entitled RHEL CDN, not the public UBI repos. Konflux's `prefetch-dependencies` task needs an `activation-key` secret in the `obsint-processing-tenant` namespace to authenticate to that CDN — without it, prefetching fails with a misleading `SSLCertVerificationError: self-signed certificate in certificate chain`. This secret is namespace-scoped (shared with `rules-containers`), see the value in Bitwarden, so it only needs to be created once per tenant:
 

@@ -2,16 +2,16 @@
 
 # Adapted from rules-containers/scripts/update_rpm_lockfile.sh
 
-# Update monolithic/rpms.lock.yaml using rpm-lockfile-prototype.
+# Update rpms.lock.yaml using rpm-lockfile-prototype.
 #
-# This script generates the RPM lockfile from monolithic/rpms.in.yaml using
+# This script generates the RPM lockfile from rpms.in.yaml using
 # rpm-lockfile-prototype inside a container registered with subscription-manager,
 # so it has access to the full entitled RHEL CDN (e.g. postgresql-devel, which is
 # not published on the public UBI CDN).
 #
-# Authentication (pick one):
+# Authentication (pick one; all values via env vars):
 #   Username/password:
-#     RH_USER=<username>  (password prompted if unset)
+#     RH_USER=<username> PASSWORD=<password>
 #   Org ID + activation key:
 #     RH_ORG_ID=<org_id> RH_ACTIVATION_KEY=<activation_key>
 #     Also requires scripts/.dockerconfig.json for registry.redhat.io pulls.
@@ -21,56 +21,40 @@ set -e
 # Get script directory and repo root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-RPM_PREFETCH_DIR="${REPO_ROOT}/monolithic"
-INPUT_FILE="${RPM_PREFETCH_DIR}/rpms.in.yaml"
-OUTPUT_FILE="${RPM_PREFETCH_DIR}/rpms.lock.yaml"
-DOCKERFILE="${RPM_PREFETCH_DIR}/Dockerfile"
+INPUT_FILE="${REPO_ROOT}/rpms.in.yaml"
+OUTPUT_FILE="${REPO_ROOT}/rpms.lock.yaml"
+DOCKERFILE="${REPO_ROOT}/Dockerfile"
 DOCKERCONFIG_FILE="${SCRIPT_DIR}/.dockerconfig.json"
 
-# Check if input file exists
+# Prerequisites
 if [ ! -f "${INPUT_FILE}" ]; then
     echo "Error: Input file not found: ${INPUT_FILE}" >&2
     exit 1
 fi
 
-# Check if Dockerfile exists
 if [ ! -f "${DOCKERFILE}" ]; then
     echo "Error: Dockerfile not found: ${DOCKERFILE}" >&2
     exit 1
 fi
 
-# Resolve authentication: username/password or org_id + activation-key
-AUTH_MODE=""
-if [ -n "${RH_ORG_ID}" ] || [ -n "${RH_ACTIVATION_KEY}" ]; then
-    AUTH_MODE="activationkey"
-elif [ -n "${RH_USER}" ]; then
-    AUTH_MODE="password"
+if command -v podman >/dev/null 2>&1; then
+    CONTAINER_CMD="podman"
+elif command -v docker >/dev/null 2>&1; then
+    CONTAINER_CMD="docker"
 else
-    echo "Select Red Hat authentication method:"
-    echo "  1) Username / password"
-    echo "  2) Organization ID / activation key"
-    read -r -p "Choice [1/2]: " AUTH_CHOICE
-    case "${AUTH_CHOICE}" in
-        2) AUTH_MODE="activationkey" ;;
-        *) AUTH_MODE="password" ;;
-    esac
+    echo "Error: docker or podman not found in PATH" >&2
+    exit 1
 fi
 
-if [ "${AUTH_MODE}" = "activationkey" ]; then
-    if [ -z "${RH_ORG_ID}" ]; then
-        read -r -p "Enter Red Hat organization ID: " RH_ORG_ID
-        if [ -z "${RH_ORG_ID}" ]; then
-            echo "Error: Organization ID cannot be empty" >&2
-            exit 1
-        fi
-    fi
-    if [ -z "${RH_ACTIVATION_KEY}" ]; then
-        read -rs -p "Enter activation key: " RH_ACTIVATION_KEY
-        echo ""
-        if [ -z "${RH_ACTIVATION_KEY}" ]; then
-            echo "Error: Activation key cannot be empty" >&2
-            exit 1
-        fi
+# Resolve authentication: username/password or org_id + activation-key
+if [ -n "${RH_ORG_ID}" ] || [ -n "${RH_ACTIVATION_KEY}" ]; then
+    AUTH_MODE="activationkey"
+    missing=()
+    [ -z "${RH_ORG_ID}" ] && missing+=("RH_ORG_ID")
+    [ -z "${RH_ACTIVATION_KEY}" ] && missing+=("RH_ACTIVATION_KEY")
+    if [ ${#missing[@]} -gt 0 ]; then
+        echo "Error: Missing required env vars for activation-key mode: ${missing[*]}" >&2
+        exit 1
     fi
     if [ ! -f "${DOCKERCONFIG_FILE}" ]; then
         echo "Error: Registry auth file not found: ${DOCKERCONFIG_FILE}" >&2
@@ -80,33 +64,20 @@ if [ "${AUTH_MODE}" = "activationkey" ]; then
     SUB_MGR_CMD="subscription-manager register --org=\${RH_ORG_ID} --activationkey=\${RH_ACTIVATION_KEY}"
     # Org/activation-key are not valid registry credentials; use the dockerconfig instead.
     SKOPEO_LOGIN_CMD="export REGISTRY_AUTH_FILE=/source/scripts/.dockerconfig.json"
-else
-    if [ -z "${RH_USER}" ]; then
-        read -r -p "Enter Red Hat username: " RH_USER
-        if [ -z "${RH_USER}" ]; then
-            echo "Error: Red Hat username cannot be empty" >&2
-            exit 1
-        fi
+elif [ -n "${RH_USER}" ] || [ -n "${PASSWORD}" ]; then
+    AUTH_MODE="password"
+    missing=()
+    [ -z "${RH_USER}" ] && missing+=("RH_USER")
+    [ -z "${PASSWORD}" ] && missing+=("PASSWORD")
+    if [ ${#missing[@]} -gt 0 ]; then
+        echo "Error: Missing required env vars for password mode: ${missing[*]}" >&2
+        exit 1
     fi
-    if [ -z "${PASSWORD}" ]; then
-        read -rs -p "Enter password for ${RH_USER}: " PASSWORD
-        echo ""
-        if [ -z "${PASSWORD}" ]; then
-            echo "Error: Password cannot be empty" >&2
-            exit 1
-        fi
-    fi
-    SUB_MGR_CMD="subscription-manager register --username=\${RH_USER} --password=\${PASSWORD}"
-    SKOPEO_LOGIN_CMD="skopeo login registry.redhat.io -u \$RH_USER -p \$PASSWORD"
-fi
-
-# Require docker or podman
-if command -v podman >/dev/null 2>&1; then
-    CONTAINER_CMD="podman"
-elif command -v docker >/dev/null 2>&1; then
-    CONTAINER_CMD="docker"
+    SUB_MGR_CMD="subscription-manager register --username=\"\${RH_USER}\" --password=\"\${PASSWORD}\""
+    SKOPEO_LOGIN_CMD="skopeo login registry.redhat.io -u \"\$RH_USER\" -p \"\$PASSWORD\""
 else
-    echo "Error: docker or podman not found in PATH" >&2; exit 1
+    echo "Error: Set RH_ORG_ID+RH_ACTIVATION_KEY or RH_USER+PASSWORD" >&2
+    exit 1
 fi
 
 echo "Using ${CONTAINER_CMD} to update RPM lockfile..."
@@ -118,10 +89,10 @@ echo ""
 # Run the container from the repo root so paths work correctly
 cd "${REPO_ROOT}"
 
-# Build container command arguments
-# Force x86_64 platform to ensure consistent repo configuration across host architectures
+# Force x86_64 platform to ensure consistent repo configuration across host architectures.
+# No TTY (-t): credentials come from env vars; this script is always non-interactive.
 CONTAINER_ARGS=(
-    "run" "--rm" "-it"
+    "run" "--rm" "-i"
     "--platform" "linux/amd64"
     "-v" "$(pwd):/source:Z"
 )
@@ -163,10 +134,10 @@ subscription-manager repos --enable codeready-builder-for-rhel-9-x86_64-rpms
 dnf install -y pip skopeo git
 pip install --user git+https://github.com/konflux-ci/rpm-lockfile-prototype.git
 ${SKOPEO_LOGIN_CMD}
-/usr/bin/cp -f /etc/yum.repos.d/redhat.repo /source/monolithic/redhat.repo
+/usr/bin/cp -f /etc/yum.repos.d/redhat.repo /source/redhat.repo
 cd /source
-~/.local/bin/rpm-lockfile-prototype monolithic/rpms.in.yaml --outfile monolithic/rpms.lock.yaml
-rm -rf /source/monolithic/redhat.repo
+~/.local/bin/rpm-lockfile-prototype rpms.in.yaml --outfile rpms.lock.yaml
+rm -rf /source/redhat.repo
 EOF
 )
 
