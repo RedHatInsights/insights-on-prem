@@ -407,13 +407,13 @@ podman run --rm --platform linux/amd64 -v "$(pwd):/work:Z" -w /work python:3.12-
 
 Updating rpms should be done using
 
-```
+```bash
 RH_ORG_ID=... RH_ACTIVATION_KEY=... bash scripts/update_rpm_lockfile.sh
 # Or if you have a .dockerconfig.json file:
-RH_USER=... PASSWORD=... DOCKERCONFIG_FILE=<path-to-dockerconfig.json> bash scripts/update_rpm_lockfile.sh
+RH_USER=... PASSWORD=... bash scripts/update_rpm_lockfile.sh
 ```
 
-The `AUTH_MODE` is determined by whether `RH_ORG_ID`+`RH_ACTIVATION_KEY` are set. If they are set, the `AUTH_MODE` is `activationkey`. If they are not set, the `AUTH_MODE` is `password`.
+The `AUTH_MODE` is determined by whether `RH_ORG_ID`+`RH_ACTIVATION_KEY` are set. If they are set, the `AUTH_MODE` is `activationkey`. If they are not set, the `AUTH_MODE` is `password`. The `activationkey` mode requires a `.dockerconfig.json` file in the script directory.
 
 Some RPMs (e.g. `postgresql-devel`) are only available on the entitled RHEL CDN, not the public UBI repos. Konflux's `prefetch-dependencies` task needs an `activation-key` secret in the `obsint-processing-tenant` namespace to authenticate to that CDN — without it, prefetching fails with a misleading `SSLCertVerificationError: self-signed certificate in certificate chain`. This secret is namespace-scoped (shared with `rules-containers`), see the value in Bitwarden, so it only needs to be created once per tenant:
 
