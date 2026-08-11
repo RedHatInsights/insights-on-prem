@@ -287,6 +287,16 @@ if [ -n "$USE_MEMRAY" ]; then
     podman commit insights-app insights-app-memray:latest
 
     NETWORK_NAME=$(podman inspect --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}' insights-postgres 2>/dev/null)
+
+    # Capture bind-mount volumes from the running compose container
+    # BEFORE stopping it.  The podman-run below bypasses compose,
+    # so compose-defined volumes (e.g. patched insights-core and
+    # ccx-ocp-core overlays) would be silently lost without this.
+    COMPOSE_VOLUMES=()
+    while IFS= read -r vol; do
+        [ -n "$vol" ] && COMPOSE_VOLUMES+=(-v "$vol")
+    done < <(podman inspect --format '{{range .Mounts}}{{if eq .Type "bind"}}{{.Source}}:{{.Destination}}{{println}}{{end}}{{end}}' insights-app 2>/dev/null)
+
     podman compose -f "$COMPOSE_DIR/docker-compose.yml" stop app 2>/dev/null || true
     podman rm insights-app 2>/dev/null || true
 
@@ -303,8 +313,7 @@ if [ -n "$USE_MEMRAY" ]; then
         -e MAX_FILE_SIZE=104857600 \
         -e TEMP_UPLOAD_DIR=/tmp/insights-uploads \
         -e PYTHONUNBUFFERED=1 \
-        -v "$COMPOSE_DIR/app:/app/app" \
-        -v "$COMPOSE_DIR/config.yml:/app/config.yml" \
+        "${COMPOSE_VOLUMES[@]}" \
         --memory 4g \
         insights-app-memray:latest \
         /opt/venv/bin/python -m memray run --output /tmp/memray-profile.bin \
