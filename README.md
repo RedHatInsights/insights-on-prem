@@ -454,15 +454,17 @@ podman run --rm --platform linux/amd64 -v "$(pwd):/work:Z" -w /work python:3.12-
 
 `requirements.txt` is the fully-pinned runtime lockfile; `requirements-build.txt` lists the build-backend sdists (e.g. `setuptools`, `cython`, `maturin`) Hermeto needs to prefetch so packages without prebuilt wheels can be built from source in the hermetic build.
 
-Updating rpms should be done using
+To regenerate `rpms.lock.yaml`, run the helper **inside a `linux/amd64` UBI9 container** (needs `subscription-manager` for entitled RHEL CDN repos). Do not run it on the host. Requires `RH_ORG_ID`, `RH_ACTIVATION_KEY`, and `scripts/.dockerconfig.json` (for registry.redhat.io):
 
 ```bash
-RH_ORG_ID=... RH_ACTIVATION_KEY=... bash scripts/update_rpm_lockfile.sh
-# Or if you have a .dockerconfig.json file:
-RH_USER=... PASSWORD=... bash scripts/update_rpm_lockfile.sh
+export RH_ORG_ID=...
+export RH_ACTIVATION_KEY=...
+podman run --rm --platform linux/amd64 \
+  -v "$(pwd):/work:Z" -w /work \
+  -e RH_ORG_ID -e RH_ACTIVATION_KEY \
+  registry.access.redhat.com/ubi9 \
+  bash scripts/update_rpm_lockfile.sh
 ```
-
-The `AUTH_MODE` is determined by whether `RH_ORG_ID`+`RH_ACTIVATION_KEY` are set. If they are set, the `AUTH_MODE` is `activationkey`. If they are not set, the `AUTH_MODE` is `password`. The `activationkey` mode requires a `.dockerconfig.json` file in the script directory.
 
 Some RPMs (e.g. `postgresql-devel`) are only available on the entitled RHEL CDN, not the public UBI repos. Konflux's `prefetch-dependencies` task needs an `activation-key` secret in the `obsint-processing-tenant` namespace to authenticate to that CDN — without it, prefetching fails with a misleading `SSLCertVerificationError: self-signed certificate in certificate chain`. This secret is namespace-scoped (shared with `rules-containers`), see the value in Bitwarden, so it only needs to be created once per tenant:
 
