@@ -8,7 +8,7 @@
 #   podman run --rm --platform linux/amd64 \
 #     -v "$(pwd):/work:Z" -w /work \
 #     -e RH_ORG_ID -e RH_ACTIVATION_KEY \
-#     registry.access.redhat.com/ubi9 \
+#     registry.access.redhat.com/ubi9/ubi \
 #     bash scripts/update_rpm_lockfile.sh
 #
 # Requires:
@@ -23,7 +23,7 @@ INPUT_FILE="${REPO_ROOT}/rpms.in.yaml"
 OUTPUT_FILE="${REPO_ROOT}/rpms.lock.yaml"
 DOCKERFILE="${REPO_ROOT}/Dockerfile"
 DOCKERCONFIG_FILE="${SCRIPT_DIR}/.dockerconfig.json"
-PODMAN_HINT="podman run --rm --platform linux/amd64 -v \"\$(pwd):/work:Z\" -w /work -e RH_ORG_ID -e RH_ACTIVATION_KEY registry.access.redhat.com/ubi9 bash scripts/update_rpm_lockfile.sh"
+PODMAN_HINT="podman run --rm --platform linux/amd64 -v \"\$(pwd):/work:Z\" -w /work -e RH_ORG_ID -e RH_ACTIVATION_KEY registry.access.redhat.com/ubi9/ubi bash scripts/update_rpm_lockfile.sh"
 
 cd "${REPO_ROOT}"
 
@@ -34,7 +34,7 @@ if [ "$(uname -s)" != "Linux" ] || [ "$(uname -m)" != "x86_64" ]; then
 fi
 
 if ! command -v subscription-manager >/dev/null 2>&1; then
-    echo "Error: subscription-manager not found (need UBI9/RHEL9)." >&2
+    echo "Error: subscription-manager not found (need entitlement-capable RHEL9 or ubi9/ubi)." >&2
     echo "Use: ${PODMAN_HINT}" >&2
     exit 1
 fi
@@ -68,12 +68,20 @@ echo "Input:  ${INPUT_FILE}"
 echo "Output: ${OUTPUT_FILE}"
 echo ""
 
-# Unregister on every exit so repeated runs don't leak registered systems and
-# exhaust the account's subscription/system-registration limit (surfaces as
-# "This system has no repositories available through subscriptions.").
-trap 'subscription-manager unregister || true' EXIT
+# Unregister only if this run successfully registered, so we don't tear down a
+# pre-existing host/container registration on early failure. Always remove the
+# copied redhat.repo so repeated runs don't leave entitled repo metadata behind.
+REGISTERED=0
+cleanup() {
+    rm -f "${REPO_ROOT}/redhat.repo"
+    if [ "${REGISTERED}" -eq 1 ]; then
+        subscription-manager unregister || true
+    fi
+}
+trap cleanup EXIT
 
 subscription-manager register --org="${RH_ORG_ID}" --activationkey="${RH_ACTIVATION_KEY}"
+REGISTERED=1
 subscription-manager refresh
 # Activation keys often enable EUS repos by default. Those resolve $releasever
 # to "9" and 404 on the CDN (eus/rhel9/9/...), so drop them and use the regular
@@ -83,17 +91,15 @@ subscription-manager repos --enable rhel-9-for-x86_64-baseos-rpms
 subscription-manager repos --enable rhel-9-for-x86_64-appstream-rpms
 subscription-manager repos --enable codeready-builder-for-rhel-9-x86_64-rpms
 
-dnf install -y pip skopeo git
-pip install --user git+https://github.com/konflux-ci/rpm-lockfile-prototype.git
+dnf install -y python3-pip skopeo git
+python3 -m pip install --user git+https://github.com/konflux-ci/rpm-lockfile-prototype.git
 
 export REGISTRY_AUTH_FILE="${DOCKERCONFIG_FILE}"
 
 # rpm-lockfile-prototype reads redhat.repo from the working directory.
 /usr/bin/cp -f /etc/yum.repos.d/redhat.repo "${REPO_ROOT}/redhat.repo"
-trap 'rm -f "${REPO_ROOT}/redhat.repo"; subscription-manager unregister || true' EXIT
 
 ~/.local/bin/rpm-lockfile-prototype rpms.in.yaml --outfile rpms.lock.yaml
-rm -f "${REPO_ROOT}/redhat.repo"
 
 if [ ! -s "${OUTPUT_FILE}" ]; then
     echo "Error: Output file is empty or was not created" >&2

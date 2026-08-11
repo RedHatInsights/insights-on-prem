@@ -454,7 +454,7 @@ podman run --rm --platform linux/amd64 -v "$(pwd):/work:Z" -w /work python:3.12-
 
 `requirements.txt` is the fully-pinned runtime lockfile; `requirements-build.txt` lists the build-backend sdists (e.g. `setuptools`, `cython`, `maturin`) Hermeto needs to prefetch so packages without prebuilt wheels can be built from source in the hermetic build.
 
-To regenerate `rpms.lock.yaml`, run the helper **inside a `linux/amd64` UBI9 container** (needs `subscription-manager` for entitled RHEL CDN repos). Do not run it on the host. Requires `RH_ORG_ID`, `RH_ACTIVATION_KEY`, and `scripts/.dockerconfig.json` (for registry.redhat.io):
+To regenerate `rpms.lock.yaml`, run the helper **inside a `linux/amd64` entitlement-capable RHEL9/UBI9 container** (`registry.access.redhat.com/ubi9/ubi`, which includes `subscription-manager` for entitled RHEL CDN repos). Do not run it on the host. Requires `RH_ORG_ID`, `RH_ACTIVATION_KEY`, and `scripts/.dockerconfig.json` (for registry.redhat.io):
 
 ```bash
 export RH_ORG_ID=...
@@ -462,7 +462,7 @@ export RH_ACTIVATION_KEY=...
 podman run --rm --platform linux/amd64 \
   -v "$(pwd):/work:Z" -w /work \
   -e RH_ORG_ID -e RH_ACTIVATION_KEY \
-  registry.access.redhat.com/ubi9 \
+  registry.access.redhat.com/ubi9/ubi \
   bash scripts/update_rpm_lockfile.sh
 ```
 
