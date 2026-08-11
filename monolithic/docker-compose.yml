@@ -35,6 +35,9 @@ services:
       POSTGRES_PASSWORD: insights
       MAX_FILE_SIZE: 104857600
       TEMP_UPLOAD_DIR: /tmp/insights-uploads
+      # Enable jemalloc on native x86_64 (crashes under QEMU on ARM Mac):
+      # LD_PRELOAD: /usr/lib64/libjemalloc.so.2
+      # MALLOC_CONF: "background_thread:true,dirty_decay_ms:1000,muzzy_decay_ms:1000"
     ports:
       - "8000:8000"
     volumes:
@@ -53,7 +56,7 @@ services:
       - insights-network
     mem_limit: 4g
     cpus: "1.0"
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir app
 
 volumes:
   postgres_data:
