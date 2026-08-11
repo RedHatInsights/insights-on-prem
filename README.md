@@ -317,9 +317,16 @@ cert-manager automatically renews the server-side certificates before expiry. Wh
 
 #### Network Policies
 
-Insights on Prem authenticates clients via mTLS client certificate verification. Since HAProxy is the only component that obtains a client certificate, it is the sole authorized client of the service. HAProxy itself is not exposed outside the cluster, but NetworkPolicies are needed to prevent unintended in-cluster traffic from reaching it.
+Insights on Prem authenticates clients via mTLS client certificate verification. Since HAProxy is the only component that obtains a client certificate, it is the sole authorized client of the service. HAProxy itself is not exposed outside the cluster, but NetworkPolicies prevent unintended in-cluster traffic from reaching it.
 
-NetworkPolicies ([#252](https://github.com/RedHatInsights/lightspeed-advisor-on-premise-ocp/pull/252)) will restrict ingress to HAProxy to only its expected consumers. On the hub, HAProxy can be reached by the Insights Operator, Insights Client, and the ACM console. On all other managed clusters, only the Insights Operator is allowed.
+Two NetworkPolicies restrict ingress to the HAProxy proxy pod (`app: insights-operator-proxy`):
+
+| Policy | Deployed to | Allowed callers |
+| --- | --- | --- |
+| `insights-operator-proxy` (`13-spoke-policy.yml`) | All managed clusters (including hub) | Insights Operator (`app: insights-operator`, same namespace) |
+| `insights-operator-proxy-hub` (`14-hub-config.yml`) | Hub only | Insights Client and ACM console, both from `open-cluster-management` |
+
+On managed clusters only the first policy applies, so only the Insights Operator can reach HAProxy. On the hub both policies apply and Kubernetes unions their ingress rules, additionally allowing the Insights Client and the ACM console.
 
 ## Database Access
 
