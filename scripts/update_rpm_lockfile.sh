@@ -23,7 +23,7 @@ INPUT_FILE="${REPO_ROOT}/rpms.in.yaml"
 OUTPUT_FILE="${REPO_ROOT}/rpms.lock.yaml"
 DOCKERFILE="${REPO_ROOT}/Dockerfile"
 DOCKERCONFIG_FILE="${SCRIPT_DIR}/.dockerconfig.json"
-PODMAN_HINT='podman run --rm --platform linux/amd64 -v "$(pwd):/work:Z" -w /work -e RH_ORG_ID -e RH_ACTIVATION_KEY registry.access.redhat.com/ubi9 bash scripts/update_rpm_lockfile.sh'
+PODMAN_HINT="podman run --rm --platform linux/amd64 -v \"\$(pwd):/work:Z\" -w /work -e RH_ORG_ID -e RH_ACTIVATION_KEY registry.access.redhat.com/ubi9 bash scripts/update_rpm_lockfile.sh"
 
 cd "${REPO_ROOT}"
 
