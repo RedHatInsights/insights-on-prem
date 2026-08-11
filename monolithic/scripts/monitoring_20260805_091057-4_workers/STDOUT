@@ -1,0 +1,257 @@
+(venv) ➜  scripts git:(mzibrick-ccxdev16176) ✗ ./reproduce_leak.sh 20 0 --cooldown 5 --use-molodec --paralllel 5 --keep
+=== Pre-flight checks ===
+  Compose dir: /Users/mzibrick/Projects/RH-ccx/insights-on-prem/monolithic
+  Duration:    20 minutes (+ 5 min cool-down)
+  Bad ratio:   0
+  Memray:      disabled
+  Output:      /Users/mzibrick/Projects/RH-ccx/insights-on-prem/monolithic/scripts/monitoring_20260805_091057
+
+=== Cleaning up previous run ===
+monolithic_postgres_data
+monolithic_temp_uploads
+
+=== Starting services ===
+>>>> Executing external compose provider "/opt/homebrew/bin/podman-compose". Please see podman-compose(1) for how to disable this message. <<<<
+
+25464d6a8b69ae7001dda8527e24b201f90b5391f686d6ea324913c92b81eae7
+be844869e1fe7cc4f55e0f2365cd597b8df707bdbde13e54a7e4d813a1ca9e00
+a14b9dd03911535ef32e17e4163bb1704280df8e4b530a982d958885c884b92f
+WARNING: image platform (linux/amd64) does not match the expected platform (linux/arm64)
+82b41551c331d1c6d57788dcd304ab5504f79da81c4b4586244da3e43cec77db
+insights-postgres
+insights-app
+
+Waiting for app to be ready...
+  Waiting... (5s, last status: 000000)
+  Waiting... (10s, last status: 000000)
+  Waiting... (15s, last status: 000000)
+  Waiting... (20s, last status: 000000)
+  App is ready (HTTP 200 on /health)
+
+=== Checking insights-core fix status ===
+  insights-core fix: MISSING — this run should reproduce the leak
+
+=== Warm-up (uploading 3 archives to load insights-core components) ===
+Using molodec for archive generation
+
+============================================================
+CONTINUOUS MODE: 999 min, 1 workers
+Bad archive ratio: 0%
+Target: http://localhost:8000/api/ingress/v1/upload
+============================================================
+
+  Warm-up: 1/3 archives processed...
+  Warm-up: 2/3 archives processed...
+  Warm-up: 4/3 archives processed...
+  Warm-up complete — components loaded
+  Baseline memory: 399.9 MiB
+
+=== Starting monitoring ===
+  Monitor PID: 55511
+=== insights-on-prem Memory Monitor ===
+Containers:     insights-app insights-postgres
+Duration:       25 minutes
+Sample interval: 10s
+Output:         /Users/mzibrick/Projects/RH-ccx/insights-on-prem/monolithic/scripts/monitoring_20260805_091057/
+
+Monitoring started at Wed Aug  5 09:11:42 CEST 2026
+Press Ctrl+C to stop
+
+  [  0 min] insights-app         mem=397.7 MiB  cpu=80.25%  disk=1 MB
+  [  0 min] insights-postgres    mem=27.02 MiB  cpu=1.83%  disk=49 MB
+
+=== Starting load generation ===
+  Duration: 20 min
+  Bad ratio: 0
+  Workers:  3
+  Mode:     continuous
+  Archives: molodec (realistic OCP)
+
+  Load generator PID: 55607
+
+=== Running ===
+  Monitor:  55511
+  Load gen: 55607
+  Duration: 20 min load + 5 min cool-down
+  Press Ctrl+C to stop early
+
+Using molodec for archive generation
+
+============================================================
+CONTINUOUS MODE: 20 min, 10 workers
+Bad archive ratio: 0%
+Target: http://localhost:8000/api/ingress/v1/upload
+============================================================
+
+[0.4min] Sent 100 (0 bad) (Status: 202)
+  [  0 min] insights-app         mem=530.4 MiB  cpu=85.13%  disk=16 MB
+  [  0 min] insights-postgres    mem=34.38 MiB  cpu=1.47%  disk=50 MB
+[0.8min] Sent 200 (0 bad) (Status: 202)
+[1.2min] Sent 300 (0 bad) (Status: 202)
+  [  1 min] insights-app         mem=572.4 MiB  cpu=89.97%  disk=30 MB
+  [  1 min] insights-postgres    mem=34.25 MiB  cpu=1.37%  disk=50 MB
+[1.6min] Sent 400 (0 bad) (Status: 202)
+  [  1 min] insights-app         mem=627.8 MiB  cpu=92.23%  disk=43 MB
+  [  1 min] insights-postgres    mem=34.94 MiB  cpu=1.30%  disk=51 MB
+[2.0min] Sent 500 (0 bad) (Status: 202)
+[2.4min] Sent 600 (0 bad) (Status: 202)
+  [  2 min] insights-app         mem=647 MiB  cpu=93.37%  disk=58 MB
+  [  2 min] insights-postgres    mem=35.82 MiB  cpu=1.26%  disk=51 MB
+[2.9min] Sent 700 (0 bad) (Status: 202)
+[3.3min] Sent 800 (0 bad) (Status: 202)
+  [  3 min] insights-app         mem=674.4 MiB  cpu=94.20%  disk=71 MB
+  [  3 min] insights-postgres    mem=36.29 MiB  cpu=1.22%  disk=52 MB
+[3.7min] Sent 900 (0 bad) (Status: 202)
+  [  3 min] insights-app         mem=703.6 MiB  cpu=94.81%  disk=85 MB
+  [  3 min] insights-postgres    mem=35.85 MiB  cpu=1.21%  disk=52 MB
+[4.1min] Sent 1000 (0 bad) (Status: 202)
+  [  4 min] insights-app         mem=706.1 MiB  cpu=95.27%  disk=93 MB
+  [  4 min] insights-postgres    mem=36.86 MiB  cpu=1.19%  disk=50 MB
+[4.7min] Sent 1100 (0 bad) (Status: 202)
+[5.1min] Sent 1200 (0 bad) (Status: 202)
+  [  5 min] insights-app         mem=744.6 MiB  cpu=95.66%  disk=107 MB
+  [  5 min] insights-postgres    mem=37.34 MiB  cpu=1.18%  disk=66 MB
+[5.6min] Sent 1300 (0 bad) (Status: 202)
+  [  5 min] insights-app         mem=746.3 MiB  cpu=96.00%  disk=120 MB
+  [  5 min] insights-postgres    mem=37.57 MiB  cpu=1.16%  disk=66 MB
+[6.0min] Sent 1400 (0 bad) (Status: 202)
+[6.4min] Sent 1500 (0 bad) (Status: 202)
+  [  6 min] insights-app         mem=767.4 MiB  cpu=96.24%  disk=134 MB
+  [  6 min] insights-postgres    mem=37.34 MiB  cpu=1.15%  disk=66 MB
+[6.8min] Sent 1600 (0 bad) (Status: 202)
+[7.2min] Sent 1700 (0 bad) (Status: 202)
+  [  7 min] insights-app         mem=783.9 MiB  cpu=96.45%  disk=148 MB
+  [  7 min] insights-postgres    mem=37.78 MiB  cpu=1.13%  disk=67 MB
+[7.6min] Sent 1800 (0 bad) (Status: 202)
+  [  7 min] insights-app         mem=805.3 MiB  cpu=96.66%  disk=161 MB
+  [  7 min] insights-postgres    mem=38.44 MiB  cpu=1.11%  disk=67 MB
+[8.0min] Sent 1900 (0 bad) (Status: 202)
+[8.4min] Sent 2000 (0 bad) (Status: 202)
+  [  8 min] insights-app         mem=824.2 MiB  cpu=96.81%  disk=175 MB
+  [  8 min] insights-postgres    mem=38.27 MiB  cpu=1.10%  disk=67 MB
+[8.8min] Sent 2100 (0 bad) (Status: 202)
+  [  9 min] insights-app         mem=849.6 MiB  cpu=96.95%  disk=189 MB
+  [  9 min] insights-postgres    mem=38.58 MiB  cpu=1.10%  disk=68 MB
+[9.2min] Sent 2200 (0 bad) (Status: 202)
+[9.6min] Sent 2300 (0 bad) (Status: 202)
+  [  9 min] insights-app         mem=861.6 MiB  cpu=97.06%  disk=203 MB
+  [  9 min] insights-postgres    mem=39.57 MiB  cpu=1.09%  disk=68 MB
+[10.0min] Sent 2400 (0 bad) (Status: 202)
+[10.4min] Sent 2500 (0 bad) (Status: 202)
+  [ 10 min] insights-app         mem=888.2 MiB  cpu=97.16%  disk=217 MB
+  [ 10 min] insights-postgres    mem=40.05 MiB  cpu=1.09%  disk=68 MB
+[10.9min] Sent 2600 (0 bad) (Status: 202)
+  [ 11 min] insights-app         mem=896.6 MiB  cpu=97.23%  disk=230 MB
+  [ 11 min] insights-postgres    mem=39.41 MiB  cpu=1.08%  disk=68 MB
+[11.3min] Sent 2700 (0 bad) (Status: 202)
+[11.7min] Sent 2800 (0 bad) (Status: 202)
+  [ 11 min] insights-app         mem=914.6 MiB  cpu=97.29%  disk=244 MB
+  [ 11 min] insights-postgres    mem=39.72 MiB  cpu=1.07%  disk=68 MB
+[12.2min] Sent 2900 (0 bad) (Status: 202)
+  [ 12 min] insights-app         mem=933.2 MiB  cpu=97.34%  disk=256 MB
+  [ 12 min] insights-postgres    mem=39.92 MiB  cpu=1.07%  disk=69 MB
+[12.6min] Sent 3000 (0 bad) (Status: 202)
+[13.0min] Sent 3100 (0 bad) (Status: 202)
+  [ 13 min] insights-app         mem=951.2 MiB  cpu=97.39%  disk=270 MB
+  [ 13 min] insights-postgres    mem=40.24 MiB  cpu=1.06%  disk=69 MB
+[13.4min] Sent 3200 (0 bad) (Status: 202)
+  [ 13 min] insights-app         mem=986.5 MiB  cpu=97.45%  disk=283 MB
+  [ 13 min] insights-postgres    mem=40.42 MiB  cpu=1.06%  disk=70 MB
+[13.9min] Sent 3300 (0 bad) (Status: 202)
+[14.3min] Sent 3400 (0 bad) (Status: 202)
+  [ 14 min] insights-app         mem=1026.0 MiB  cpu=97.50%  disk=297 MB
+  [ 14 min] insights-postgres    mem=41.05 MiB  cpu=1.05%  disk=70 MB
+[14.7min] Sent 3500 (0 bad) (Status: 202)
+  [ 14 min] insights-app         mem=1036.3 MiB  cpu=97.54%  disk=310 MB
+  [ 14 min] insights-postgres    mem=40.94 MiB  cpu=1.05%  disk=71 MB
+[15.1min] Sent 3600 (0 bad) (Status: 202)
+[15.5min] Sent 3700 (0 bad) (Status: 202)
+  [ 15 min] insights-app         mem=1055.7 MiB  cpu=97.57%  disk=324 MB
+  [ 15 min] insights-postgres    mem=41.13 MiB  cpu=1.04%  disk=71 MB
+[16.0min] Sent 3800 (0 bad) (Status: 202)
+  [ 16 min] insights-app         mem=1076.2 MiB  cpu=97.62%  disk=338 MB
+  [ 16 min] insights-postgres    mem=41.35 MiB  cpu=1.04%  disk=71 MB
+[16.4min] Sent 3900 (0 bad) (Status: 202)
+[16.8min] Sent 4000 (0 bad) (Status: 202)
+  [ 16 min] insights-app         mem=1092.6 MiB  cpu=97.64%  disk=351 MB
+  [ 16 min] insights-postgres    mem=41.6 MiB  cpu=1.04%  disk=71 MB
+[17.2min] Sent 4100 (0 bad) (Status: 202)
+  [ 17 min] insights-app         mem=1109.0 MiB  cpu=97.69%  disk=364 MB
+  [ 17 min] insights-postgres    mem=41.86 MiB  cpu=1.03%  disk=72 MB
+[17.7min] Sent 4200 (0 bad) (Status: 202)
+[18.1min] Sent 4300 (0 bad) (Status: 202)
+  [ 18 min] insights-app         mem=1129.5 MiB  cpu=97.73%  disk=377 MB
+  [ 18 min] insights-postgres    mem=42.16 MiB  cpu=1.03%  disk=72 MB
+[18.5min] Sent 4400 (0 bad) (Status: 202)
+  [ 18 min] insights-app         mem=1143.8 MiB  cpu=97.77%  disk=390 MB
+  [ 18 min] insights-postgres    mem=42.49 MiB  cpu=1.03%  disk=72 MB
+[18.9min] Sent 4500 (0 bad) (Status: 202)
+[19.4min] Sent 4600 (0 bad) (Status: 202)
+  [ 19 min] insights-app         mem=1164.3 MiB  cpu=97.80%  disk=404 MB
+  [ 19 min] insights-postgres    mem=42.58 MiB  cpu=1.02%  disk=72 MB
+[19.8min] Sent 4700 (0 bad) (Status: 202)
+
+============================================================
+COMPLETE — 4765 archives (0 bad) in 20 min (10 workers)
+============================================================
+
+
+=== Cool-down (5 min, no archives sent — watching memory) ===
+  [ 20 min] insights-app         mem=1178.6 MiB  cpu=97.85%  disk=415 MB
+  [ 20 min] insights-postgres    mem=43.17 MiB  cpu=1.02%  disk=73 MB
+  [ 20 min] insights-app         mem=1181.7 MiB  cpu=97.90%  disk=413 MB
+  [ 20 min] insights-postgres    mem=43.28 MiB  cpu=1.01%  disk=73 MB
+  [ 21 min] insights-app         mem=1183.7 MiB  cpu=97.95%  disk=411 MB
+  [ 21 min] insights-postgres    mem=44.12 MiB  cpu=1.00%  disk=73 MB
+  [ 21 min] insights-app         mem=1188.9 MiB  cpu=98.00%  disk=408 MB
+  [ 21 min] insights-postgres    mem=44.25 MiB  cpu=0.99%  disk=73 MB
+  [ 22 min] insights-app         mem=1182.7 MiB  cpu=98.04%  disk=406 MB
+  [ 22 min] insights-postgres    mem=44.23 MiB  cpu=0.98%  disk=73 MB
+  [ 23 min] insights-app         mem=1182.7 MiB  cpu=98.09%  disk=404 MB
+  [ 23 min] insights-postgres    mem=45.1 MiB  cpu=0.98%  disk=77 MB
+  [ 23 min] insights-app         mem=1201.2 MiB  cpu=98.13%  disk=401 MB
+  [ 23 min] insights-postgres    mem=45.35 MiB  cpu=0.97%  disk=78 MB
+  [ 24 min] insights-app         mem=1183.7 MiB  cpu=98.17%  disk=399 MB
+  [ 24 min] insights-postgres    mem=45.74 MiB  cpu=0.96%  disk=78 MB
+  [ 24 min] insights-app         mem=1181.7 MiB  cpu=98.20%  disk=396 MB
+  [ 24 min] insights-postgres    mem=46.53 MiB  cpu=0.96%  disk=78 MB
+
+Monitoring completed at Wed Aug  5 09:36:51 CEST 2026
+# Monitoring Summary
+Start: 2026-08-05 09:11:42
+End:   2026-08-05 09:36:51
+Duration: 25 minutes
+
+## insights-app
+  Container mem: start=397.7 MB  end=1181.7 MB  min=397.7 MB  max=1216.5 MB  delta=+784.0 MB
+  Growth rate:   +1960.00 MB/hr
+  VmRSS:         start=342776 KB  end=1067000 KB  delta=+724224 KB (+707.2 MB)
+  Disk:          start=1 MB  end=396 MB  delta=+395 MB
+
+## insights-postgres
+  Container mem: start=27.0 MB  end=46.5 MB  min=27.0 MB  max=46.5 MB  delta=+19.5 MB
+  Growth rate:   +48.77 MB/hr
+  VmRSS:         start=27116 KB  end=29736 KB  delta=+2620 KB (+2.6 MB)
+  Disk:          start=49 MB  end=78 MB  delta=+29 MB
+
+
+Data saved to: /Users/mzibrick/Projects/RH-ccx/insights-on-prem/monolithic/scripts/monitoring_20260805_091057/
+
+Done.
+
+=== Shutting down ===
+
+=== Report (insights-app) ===
+  Start:    397.7 MiB
+  At load stop: 1183.7 MiB  (after 20 min)
+  After cool-down: 1181.7 MiB  (after 24 min)
+  Cool-down delta: -2.0 MiB
+  Cool-down:  RETAINED — memory stayed flat (not released)
+  Delta:    +784.0 MiB over 24 min
+  Rate:     +1960.0 MiB/hr
+  Verdict:  LEAK DETECTED — significant growth (1960.0 MiB/hr)
+  Disk:     1 -> 396 MB (+395 MB)
+
+Full data: /Users/mzibrick/Projects/RH-ccx/insights-on-prem/monolithic/scripts/monitoring_20260805_091057/
+Containers kept running (--keep). Stop manually with:
+  podman compose -f /Users/mzibrick/Projects/RH-ccx/insights-on-prem/monolithic/docker-compose.yml down

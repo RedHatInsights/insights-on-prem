@@ -1,0 +1,17 @@
+# Monitoring Summary
+Start: 2026-08-05 14:52:48
+End:   2026-08-05 15:17:56
+Duration: 25 minutes
+
+## insights-app
+  Container mem: start=387.6 MB  end=447.3 MB  min=387.6 MB  max=456.0 MB  delta=+59.7 MB
+  Growth rate:   +149.25 MB/hr
+  VmRSS:         start=336512 KB  end=386672 KB  delta=+50160 KB (+49.0 MB)
+  Disk:          start=1 MB  end=429 MB  delta=+428 MB
+
+## insights-postgres
+  Container mem: start=25.0 MB  end=43.2 MB  min=25.0 MB  max=43.2 MB  delta=+18.2 MB
+  Growth rate:   +45.57 MB/hr
+  VmRSS:         start=26952 KB  end=36068 KB  delta=+9116 KB (+8.9 MB)
+  Disk:          start=49 MB  end=83 MB  delta=+34 MB
+
