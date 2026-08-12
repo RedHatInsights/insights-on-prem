@@ -37,6 +37,10 @@ spec:
       labels:
         app: insights-postgres
     spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - name: postgres
         image: registry.redhat.io/rhel9/postgresql-16
@@ -44,6 +48,29 @@ spec:
         - containerPort: 5432
           name: postgres
           protocol: TCP
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 20m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+        livenessProbe:
+          tcpSocket:
+            port: 5432
+          initialDelaySeconds: 30
+          periodSeconds: 20
+        readinessProbe:
+          tcpSocket:
+            port: 5432
+          initialDelaySeconds: 5
+          periodSeconds: 10
         env:
         - name: POSTGRESQL_USER
           valueFrom:
@@ -61,12 +88,24 @@ spec:
               name: insights-postgres
               key: database-name
         volumeMounts:
+        - name: pgsql
+          mountPath: /var/lib/pgsql
         - name: data
           mountPath: /var/lib/pgsql/data
+        - name: tmp
+          mountPath: /tmp
+        - name: run
+          mountPath: /var/run/postgresql
       volumes:
+      - name: pgsql
+        emptyDir: {}
       - name: data
         persistentVolumeClaim:
           claimName: insights-postgres
+      - name: tmp
+        emptyDir: {}
+      - name: run
+        emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

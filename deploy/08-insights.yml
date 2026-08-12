@@ -13,6 +13,10 @@ spec:
     spec:
       terminationGracePeriodSeconds: 300
       serviceAccountName: insights-on-prem
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - name: insights-on-prem
         image: quay.io/ccxdev/insights-on-premise-poc:latest
@@ -20,6 +24,24 @@ spec:
         - containerPort: 8443
           name: https
           protocol: TCP
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 100m
+            memory: 1Gi
+          limits:
+            cpu: 500m
+            memory: 2Gi
+        livenessProbe:
+          tcpSocket:
+            port: 8443
+          initialDelaySeconds: 15
+          periodSeconds: 20
         readinessProbe:
           tcpSocket:
             port: 8443
@@ -32,6 +54,8 @@ spec:
         - name: client-ca
           mountPath: /tls/client-ca
           readOnly: true
+        - name: tmp
+          mountPath: /tmp
         env:
         - name: MTLS_ENABLED
           value: "true"
@@ -64,6 +88,8 @@ spec:
           items:
           - key: tls.crt
             path: ca.crt
+      - name: tmp
+        emptyDir: {}
       imagePullSecrets:
       - name: ccxdev-insights-on-prem-pull-secret
   selector:
