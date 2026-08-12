@@ -1,7 +1,7 @@
 apiVersion: addon.open-cluster-management.io/v1alpha1
 kind: ClusterManagementAddOn
 metadata:
-  name: insights-operator-proxy
+  name: insights-on-prem-proxy
   annotations:
     addon.open-cluster-management.io/lifecycle: addon-manager
 spec:
@@ -9,11 +9,11 @@ spec:
     - group: addon.open-cluster-management.io
       resource: addontemplates
       defaultConfig:
-        name: insights-operator-proxy
+        name: insights-on-prem-proxy
     - group: addon.open-cluster-management.io
       resource: addondeploymentconfigs
       defaultConfig:
-        name: insights-operator-proxy
+        name: insights-on-prem-proxy
         namespace: insights-on-prem
   installStrategy:
     type: Placements
@@ -23,4 +23,4 @@ spec:
         configs:
           - group: addon.open-cluster-management.io
             resource: addontemplates
-            name: insights-operator-proxy
+            name: insights-on-prem-proxy

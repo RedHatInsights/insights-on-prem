@@ -1,9 +1,9 @@
 apiVersion: addon.open-cluster-management.io/v1alpha1
 kind: AddOnTemplate
 metadata:
-  name: insights-operator-proxy
+  name: insights-on-prem-proxy
 spec:
-  addonName: insights-operator-proxy
+  addonName: insights-on-prem-proxy
   registration:
     - type: CustomSigner
       customSigner:
@@ -11,7 +11,7 @@ spec:
         subject:
           user: managed-cluster-observability
           groups:
-            - system:open-cluster-management:insights-operator-proxy
+            - system:open-cluster-management:insights-on-prem-proxy
         signingCA:
           namespace: insights-on-prem
           name: insights-on-prem-client-ca
@@ -21,17 +21,17 @@ spec:
         - apiVersion: apps/v1
           kind: Deployment
           metadata:
-            name: insights-operator-proxy
-            namespace: openshift-insights
+            name: insights-on-prem-proxy
+            namespace: insights-on-prem
           spec:
             replicas: 1
             selector:
               matchLabels:
-                app: insights-operator-proxy
+                app: insights-on-prem-proxy
             template:
               metadata:
                 labels:
-                  app: insights-operator-proxy
+                  app: insights-on-prem-proxy
               spec:
                 containers:
                   - name: haproxy
@@ -82,10 +82,10 @@ spec:
                 volumes:
                   - name: server-cert
                     secret:
-                      secretName: insights-operator-proxy-tls
+                      secretName: insights-on-prem-proxy-tls
                   - name: hub-ca
                     configMap:
-                      name: insights-operator-proxy-hub-ca
+                      name: insights-on-prem-proxy-hub-ca
                   - name: haproxy-config
                     configMap:
-                      name: insights-operator-proxy-config
+                      name: insights-on-prem-proxy-config

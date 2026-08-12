@@ -297,7 +297,6 @@ HAProxy is deployed as an ACM managed cluster addon on every managed cluster, in
 >
 > - A CONNECT proxy in `open-cluster-management` works around an ACM console limitation with service CA trust (to be removed by [#209](https://github.com/RedHatInsights/lightspeed-advisor-on-premise-ocp/pull/209) once the console fix is backported).
 > - A cluster-wide Proxy patch distributes the service CA to the Insights Operator until it natively supports a CA certificate field in its ConfigMap (to be removed by [#204](https://github.com/RedHatInsights/lightspeed-advisor-on-premise-ocp/pull/204)).
-> - HAProxy is currently deployed in the `openshift-insights` namespace on managed clusters; it will be moved to `insights-on-prem` since it is not used exclusively by the Insights Operator.
 
 ### Security
 
@@ -319,12 +318,12 @@ cert-manager automatically renews the server-side certificates before expiry. Wh
 
 Insights on Prem authenticates clients via mTLS client certificate verification. Since HAProxy is the only component that obtains a client certificate, it is the sole authorized client of the service. HAProxy itself is not exposed outside the cluster, but NetworkPolicies prevent unintended in-cluster traffic from reaching it.
 
-Two NetworkPolicies restrict ingress to the HAProxy proxy pod (`app: insights-operator-proxy`):
+Two NetworkPolicies restrict ingress to the HAProxy proxy pod (`app: insights-on-prem-proxy`):
 
 | Policy | Deployed to | Allowed callers |
 | --- | --- | --- |
-| `insights-operator-proxy` (`13-spoke-policy.yml`) | All managed clusters (including hub) | Insights Operator (`app: insights-operator`, same namespace) |
-| `insights-operator-proxy-hub` (`14-hub-config.yml`) | Hub only | Insights Client and ACM console, both from `open-cluster-management` |
+| `insights-on-prem-proxy` (`13-spoke-policy.yml`) | All managed clusters (including hub) | All pods from `openshift-insights` (Insights Operator and its periodic gathering jobs) |
+| `insights-on-prem-hub-config` (`14-hub-config.yml`) | Hub only | Insights Client and ACM console, both from `open-cluster-management` |
 
 On managed clusters only the first policy applies, so only the Insights Operator can reach HAProxy. On the hub both policies apply and Kubernetes unions their ingress rules, additionally allowing the Insights Client and the ACM console.
 

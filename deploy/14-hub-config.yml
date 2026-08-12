@@ -36,7 +36,7 @@ spec:
                                 - name: client
                                   env:
                                     - name: CCX_SERVER
-                                      value: "https://insights-operator-proxy.openshift-insights.svc.cluster.local:8443/api/v2"
+                                      value: "https://insights-on-prem-proxy.insights-on-prem.svc.cluster.local:8443/api/v2"
                                     - name: SSL_CERT_DIR
                                       value: "/var/run/secrets/kubernetes.io/serviceaccount"
                                     - name: POLL_INTERVAL
@@ -59,7 +59,7 @@ spec:
     # NODE_EXTRA_CA_CERTS (see docs/console-ca-issue.md).  When HTTPS_PROXY
     # is set, the code uses HttpsProxyAgent instead, which has no explicit
     # `ca` and therefore honours NODE_EXTRA_CA_CERTS for the target TLS
-    # handshake.  The proxy is restricted to the insights-operator-proxy
+    # handshake.  The proxy is restricted to the insights-on-prem-proxy
     # host and is only reachable inside the cluster (ClusterIP).
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
@@ -81,7 +81,7 @@ spec:
                   proxy.mjs: |
                     import { createServer } from "node:http";
                     import { connect } from "node:net";
-                    const ALLOWED = "insights-operator-proxy.openshift-insights.svc";
+                    const ALLOWED = "insights-on-prem-proxy.insights-on-prem.svc";
                     const ALLOWED_PORT = 8443;
                     const server = createServer((_req, res) => { res.writeHead(405); res.end(); });
                     server.on("connect", (req, cltSocket, head) => {
@@ -182,7 +182,7 @@ spec:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
         metadata:
-          name: insights-operator-proxy-netpol-hub
+          name: insights-on-prem-proxy-netpol-hub
         spec:
           remediationAction: enforce
           severity: medium
@@ -192,12 +192,12 @@ spec:
                 apiVersion: networking.k8s.io/v1
                 kind: NetworkPolicy
                 metadata:
-                  name: insights-operator-proxy-hub
-                  namespace: openshift-insights
+                  name: insights-on-prem-proxy-hub
+                  namespace: insights-on-prem
                 spec:
                   podSelector:
                     matchLabels:
-                      app: insights-operator-proxy
+                      app: insights-on-prem-proxy
                   policyTypes:
                     - Ingress
                   ingress:
@@ -244,7 +244,7 @@ spec:
                   name: console-config
                   namespace: open-cluster-management
                 data:
-                  UPGRADE_RISKS_PREDICTION_URL: 'https://insights-operator-proxy.openshift-insights.svc:8443/api/insights-results-aggregator/v2/upgrade-risks-prediction'
+                  UPGRADE_RISKS_PREDICTION_URL: 'https://insights-on-prem-proxy.insights-on-prem.svc:8443/api/insights-results-aggregator/v2/upgrade-risks-prediction'
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding
