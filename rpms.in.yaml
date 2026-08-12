@@ -7,7 +7,7 @@ context:
   # already-installed packages like glibc can be at a different version than
   # what's baked into ocp-rules-rhel9, and microdnf's hermetic depsolve fails
   # with "nothing provides glibc = <locked-version>".
-  image: registry.redhat.io/lightspeed-services-ocp/ocp-rules-rhel9:2026.06.30
+  image: registry.redhat.io/lightspeed-services-ocp/ocp-rules-rhel9:2026.08.11
 packages:
   # Required by maturin to build Rust-based Python extensions from source
   # (pydantic-core, uvloop, watchfiles)
