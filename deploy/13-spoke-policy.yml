@@ -1,18 +1,37 @@
 apiVersion: policy.open-cluster-management.io/v1
 kind: Policy
 metadata:
-  name: insights-operator-proxy
+  name: insights-on-prem-proxy
   namespace: insights-on-prem
 spec:
   remediationAction: enforce
   disabled: false
   policy-templates:
+    # --- Namespace (already exists on the hub; created here for spokes) ---
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: insights-on-prem-namespace
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: insights-on-prem
+                  labels:
+                    name: insights-on-prem
+
     # --- HAProxy ConfigMap ---
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
         metadata:
-          name: insights-operator-proxy-config
+          name: insights-on-prem-proxy-config
         spec:
           remediationAction: enforce
           severity: medium
@@ -22,8 +41,8 @@ spec:
                 apiVersion: v1
                 kind: ConfigMap
                 metadata:
-                  name: insights-operator-proxy-config
-                  namespace: openshift-insights
+                  name: insights-on-prem-proxy-config
+                  namespace: insights-on-prem
                 data:
                   haproxy.cfg: |
                     global
@@ -49,7 +68,7 @@ spec:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
         metadata:
-          name: insights-operator-proxy-service
+          name: insights-on-prem-proxy-service
         spec:
           remediationAction: enforce
           severity: medium
@@ -59,13 +78,13 @@ spec:
                 apiVersion: v1
                 kind: Service
                 metadata:
-                  name: insights-operator-proxy
-                  namespace: openshift-insights
+                  name: insights-on-prem-proxy
+                  namespace: insights-on-prem
                   annotations:
-                    service.beta.openshift.io/serving-cert-secret-name: insights-operator-proxy-tls
+                    service.beta.openshift.io/serving-cert-secret-name: insights-on-prem-proxy-tls
                 spec:
                   selector:
-                    app: insights-operator-proxy
+                    app: insights-on-prem-proxy
                   ports:
                     - port: 8443
                       targetPort: 8443
@@ -77,7 +96,7 @@ spec:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
         metadata:
-          name: insights-operator-proxy-hub-ca
+          name: insights-on-prem-proxy-hub-ca
         spec:
           remediationAction: enforce
           severity: medium
@@ -87,8 +106,8 @@ spec:
                 apiVersion: v1
                 kind: ConfigMap
                 metadata:
-                  name: insights-operator-proxy-hub-ca
-                  namespace: openshift-insights
+                  name: insights-on-prem-proxy-hub-ca
+                  namespace: insights-on-prem
                 data:
                   ca-bundle.crt: |
                     {{hub fromConfigMap "insights-on-prem" "insights-on-prem-hub-ca" "ca-bundle.crt" | autoindent hub}}
@@ -101,7 +120,7 @@ spec:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
         metadata:
-          name: insights-operator-proxy-service-ca-trust
+          name: insights-on-prem-proxy-service-ca-trust
         spec:
           remediationAction: enforce
           severity: medium
@@ -147,12 +166,12 @@ spec:
             {{- end }}
 
 
-    # --- NetworkPolicy: only insights-operator can reach the proxy ---
+    # --- NetworkPolicy: only openshift-insights namespace can reach the proxy ---
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
         metadata:
-          name: insights-operator-proxy-netpol
+          name: insights-on-prem-proxy-netpol
         spec:
           remediationAction: enforce
           severity: medium
@@ -162,19 +181,19 @@ spec:
                 apiVersion: networking.k8s.io/v1
                 kind: NetworkPolicy
                 metadata:
-                  name: insights-operator-proxy
-                  namespace: openshift-insights
+                  name: insights-on-prem-proxy
+                  namespace: insights-on-prem
                 spec:
                   podSelector:
                     matchLabels:
-                      app: insights-operator-proxy
+                      app: insights-on-prem-proxy
                   policyTypes:
                     - Ingress
                   ingress:
                     - from:
-                        - podSelector:
+                        - namespaceSelector:
                             matchLabels:
-                              app: insights-operator
+                              kubernetes.io/metadata.name: openshift-insights
                       ports:
                         - protocol: TCP
                           port: 8443
@@ -184,7 +203,7 @@ spec:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
         metadata:
-          name: insights-operator-proxy-operator-config
+          name: insights-on-prem-proxy-operator-config
         spec:
           remediationAction: enforce
           severity: medium
@@ -199,22 +218,22 @@ spec:
                 data:
                   config.yaml: |
                     dataReporting:
-                      uploadEndpoint: https://insights-operator-proxy.openshift-insights.svc:8443/api/ingress/v1/upload
-                      downloadEndpoint: https://insights-operator-proxy.openshift-insights.svc:8443/api/v2/cluster/%s/reports
-                      downloadEndpointTechPreview: https://insights-operator-proxy.openshift-insights.svc:8443/api/v2/cluster/%s/request/%s/report
-                      processingStatusEndpoint: https://insights-operator-proxy.openshift-insights.svc:8443/api/v2/cluster/%s/request/%s/status
+                      uploadEndpoint: https://insights-on-prem-proxy.insights-on-prem.svc:8443/api/ingress/v1/upload
+                      downloadEndpoint: https://insights-on-prem-proxy.insights-on-prem.svc:8443/api/v2/cluster/%s/reports
+                      downloadEndpointTechPreview: https://insights-on-prem-proxy.insights-on-prem.svc:8443/api/v2/cluster/%s/request/%s/report
+                      processingStatusEndpoint: https://insights-on-prem-proxy.insights-on-prem.svc:8443/api/v2/cluster/%s/request/%s/status
                       interval: 0h1m0s
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding
 metadata:
-  name: insights-operator-proxy
+  name: insights-on-prem-proxy
   namespace: insights-on-prem
 placementRef:
   name: all-managed-clusters
   apiGroup: cluster.open-cluster-management.io
   kind: Placement
 subjects:
-  - name: insights-operator-proxy
+  - name: insights-on-prem-proxy
     apiGroup: policy.open-cluster-management.io
     kind: Policy
