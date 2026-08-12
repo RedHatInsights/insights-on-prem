@@ -27,7 +27,7 @@ if [ "${PY_VER}" != "3.12" ]; then
     exit 1
 fi
 
-python3 -m pip install -q pip-tools pybuild-deps
+python3 -m pip install -q 'pip-tools>=7.0.0,<7.6.1' pybuild-deps  # TODO: revert when https://github.com/hermetoproject/pybuild-deps/pull/415 is merged and published
 pip-compile --output-file=requirements.txt requirements-in.txt
 pybuild-deps compile --generate-hashes --output-file=requirements-build.txt requirements.txt
 
