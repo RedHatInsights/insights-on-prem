@@ -33,11 +33,19 @@ spec:
                 labels:
                   app: insights-on-prem-proxy
               spec:
+                securityContext:
+                  runAsNonRoot: true
+                  seccompProfile:
+                    type: RuntimeDefault
                 containers:
                   - name: haproxy
                     image: registry.redhat.io/openshift4/ose-haproxy-router-rhel9:v4.16
                     securityContext:
+                      allowPrivilegeEscalation: false
+                      readOnlyRootFilesystem: true
                       capabilities:
+                        drop:
+                          - ALL
                         add:
                           - NET_BIND_SERVICE
                     command: ["sh", "-c"]
@@ -49,11 +57,11 @@ spec:
                         haproxy -f /usr/local/etc/haproxy/haproxy.cfg
                     resources:
                       requests:
+                        cpu: 10m
+                        memory: 64Mi
+                      limits:
                         cpu: 100m
                         memory: 128Mi
-                      limits:
-                        cpu: 300m
-                        memory: 512Mi
                     ports:
                       - containerPort: 8443
                         protocol: TCP
@@ -79,7 +87,11 @@ spec:
                       - name: haproxy-config
                         mountPath: /usr/local/etc/haproxy
                         readOnly: true
+                      - name: tmp
+                        mountPath: /tmp
                 volumes:
+                  - name: tmp
+                    emptyDir: {}
                   - name: server-cert
                     secret:
                       secretName: insights-on-prem-proxy-tls
