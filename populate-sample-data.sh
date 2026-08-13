@@ -1,5 +1,6 @@
 #!/bin/bash
-# test_ui.sh - Sets up test data to verify all four Insights sections in the ACM fleet overview UI.
+# populate-sample-data.sh - Populates a cluster with sample data so you can validate
+# that the Insights sections in the ACM fleet overview UI work correctly.
 #
 # Prerequisites: oc apply -f deploy/ must have been run first (on-prem service + insights-client configured).
 #
@@ -8,26 +9,10 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-UI_TESTS="$SCRIPT_DIR/tests/ui"
+MANIFESTS_DIR="$SCRIPT_DIR/tests/ui"
 CLUSTER_ID=$(oc get clusterversion version -o jsonpath='{.spec.clusterID}')
 
-# Capture original values of deployments we mutate so they can be restored on exit.
-ORIG_THANOS_LOOKBACK=$(oc get deployment insights-on-prem -n insights-on-prem \
-  -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="THANOS_QUERY_LOOKBACK_MINUTES")].value}' 2>/dev/null || echo "")
-
-restore() {
-  echo "Restoring deployments to original state..."
-  if [ -n "$ORIG_THANOS_LOOKBACK" ]; then
-    oc set env deployment/insights-on-prem -n insights-on-prem \
-      THANOS_QUERY_LOOKBACK_MINUTES="$ORIG_THANOS_LOOKBACK" 2>/dev/null || true
-  else
-    oc set env deployment/insights-on-prem -n insights-on-prem \
-      THANOS_QUERY_LOOKBACK_MINUTES- 2>/dev/null || true
-  fi
-}
-trap restore EXIT
-
-echo "=== Insights On-Premise UI Test Setup ==="
+echo "=== Insights On-Premise Sample Data Setup ==="
 echo "Cluster ID: $CLUSTER_ID"
 echo ""
 
@@ -38,7 +23,7 @@ echo "1. Triggering cluster recommendations..."
 # Creates a ValidatingWebhookConfiguration with timeoutSeconds > 13 for pod CREATE
 # operations. insights-operator collects webhook configs as part of its archive and
 # insights-core detects the misconfiguration. See webhook-trigger.yaml for details.
-oc apply -f "$UI_TESTS/webhook-trigger.yaml"
+oc apply -f "$MANIFESTS_DIR/webhook-trigger.yaml"
 
 # Trigger 2: operator_unmanaged rule — sets openshift-samples operator to Unmanaged.
 # Safe to use as the samples operator is non-critical and it is reversible.
@@ -47,9 +32,9 @@ oc patch configs.samples.operator.openshift.io cluster --type merge -p '{"spec":
 
 # ---------------------------------------------------------------------------
 echo ""
-echo "2. Creating test data for update risk predictions and failing operators..."
+echo "2. Creating sample data for update risk predictions..."
 # ---------------------------------------------------------------------------
-oc apply -f "$UI_TESTS/critical-alerts.yaml"
+oc apply -f "$MANIFESTS_DIR/critical-alerts.yaml"
 
 # ---------------------------------------------------------------------------
 echo ""
@@ -64,31 +49,16 @@ oc rollout status deployment/insights-on-prem -n insights-on-prem --timeout=60s
 
 # ---------------------------------------------------------------------------
 echo ""
-echo "4. Exposing on-prem service via HTTPS route (required for console backend)..."
+echo "4. Waiting for alerts to reach Thanos (~2-5 min)..."
 # ---------------------------------------------------------------------------
-# The ACM console backend enforces HTTPS for outbound calls, so the on-prem service
-# must be reachable over HTTPS. This route is for testing only — in production the
-# addon would handle service exposure properly.
-oc create route edge insights-on-prem \
-  -n insights-on-prem \
-  --service=insights-on-prem \
-  --port=8000 \
-  --insecure-policy=Redirect 2>/dev/null || true
-
-ON_PREM_ROUTE=$(oc get route insights-on-prem -n insights-on-prem -o jsonpath='{.spec.host}')
-ON_PREM_URP_URL="https://${ON_PREM_ROUTE}/api/insights-results-aggregator/v2/upgrade-risks-prediction"
-echo "   Route: $ON_PREM_URP_URL"
-
-# ---------------------------------------------------------------------------
-echo ""
-echo "5. Waiting for alerts to reach Thanos (~2-5 min)..."
-# ---------------------------------------------------------------------------
-TOKEN=$(oc exec deployment/insights-on-prem -n insights-on-prem -- cat /var/run/secrets/kubernetes.io/serviceaccount/token)
 for _ in $(seq 1 10); do
+  # The token is read *inside* the pod ($(cat ...) runs in the pod because the
+  # sh -c argument is single-quoted). This keeps the token out of the oc exec
+  # argv, which would otherwise be recorded in the Kubernetes API audit log.
   COUNT=$(oc exec deployment/insights-on-prem -n insights-on-prem -- sh -c \
-    "curl -sk -H 'Authorization: Bearer $TOKEN' \
-     'https://rbac-query-proxy.open-cluster-management-observability.svc.cluster.local:8443/api/v1/query' \
-     --data-urlencode 'query=ALERTS{alertname=~\"InsightsTest.*\"}' 2>/dev/null" | \
+    'curl -sk -H "Authorization: Bearer $(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" \
+     "https://rbac-query-proxy.open-cluster-management-observability.svc.cluster.local:8443/api/v1/query" \
+     --data-urlencode "query=ALERTS{alertname=~\"InsightsTest.*\"}" 2>/dev/null' | \
     python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d['data']['result']))" 2>/dev/null)
   echo "   $(date '+%H:%M:%S') alerts in Thanos: ${COUNT:-0}"
   [ "${COUNT:-0}" -gt 0 ] && break
@@ -97,13 +67,10 @@ done
 
 # ---------------------------------------------------------------------------
 echo ""
-echo "6. Verifying URP data comes from on-prem via the actual console route..."
+echo "5. Verifying URP data via HAProxy proxy..."
 # ---------------------------------------------------------------------------
-# Call ON_PREM_URP_URL (the HTTPS batch endpoint the console uses) with the
-# same batch payload the console sends. This exercises the full path:
-# console -> HTTPS route -> batch endpoint -> Thanos -> prediction.
-# Calling localhost directly would bypass the route and miss regressions there.
-URP_RESULT=$(curl -sk -X POST "$ON_PREM_URP_URL" \
+URP_RESULT=$(oc exec deployment/insights-on-prem-proxy -n insights-on-prem -c haproxy -- \
+  curl -sk -X POST "https://localhost:8443/api/insights-results-aggregator/v2/upgrade-risks-prediction" \
   -H 'Content-Type: application/json' \
   -d "{\"clusters\": [\"$CLUSTER_ID\"]}" 2>/dev/null)
 
@@ -117,9 +84,9 @@ check() {
   else echo "  [FAIL] $1 — $2"; FAIL=$((FAIL+1)); fi
 }
 
-check "batch URP endpoint returns cluster-local fake alerts via HTTPS route (proves full path works)" \
+check "URP endpoint returns sample alerts via HAProxy" \
   "$([ "${HAS_ALERTS:-0}" -gt 0 ] && echo ok || echo "alerts not found - Thanos may need more time")"
-check "batch URP endpoint returns upgrade_recommended=False" \
+check "URP endpoint returns upgrade_recommended=False" \
   "$([ "$UPGRADE_RECOMMENDED" = "False" ] && echo ok || echo "got: $UPGRADE_RECOMMENDED")"
 
 echo ""
@@ -132,4 +99,6 @@ echo "To clean up:"
 echo "  oc delete validatingwebhookconfiguration insights-test-webhook"
 echo "  oc patch configs.samples.operator.openshift.io cluster --type merge -p '{\"spec\":{\"managementState\":\"Managed\"}}'"
 echo "  oc delete prometheusrule insights-test-alerts -n openshift-monitoring"
-echo "  oc delete route insights-on-prem -n insights-on-prem"
+echo "  oc set env deployment/insights-on-prem -n insights-on-prem THANOS_QUERY_LOOKBACK_MINUTES-"
+
+[ "$FAIL" -eq 0 ] || exit 1
