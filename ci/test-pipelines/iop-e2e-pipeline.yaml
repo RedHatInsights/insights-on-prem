@@ -33,6 +33,17 @@ spec:
         When "true", print cluster kubeconfigs and admin passwords to logs.
         Only enable for debugging ephemeral test failures.
       default: "false"
+    - name: DEBUG_HOLD_ON_FAILURE
+      description: >-
+        When "true", keep clusters alive after a pipeline failure by
+        sleeping in a finally task. Credentials are printed to logs so
+        you can oc login. Cancel the PipelineRun when done debugging.
+      default: "false"
+    - name: TEST_FILTER
+      description: >-
+        Test filter expression passed to the e2e test runner (e.g.
+        "smoke", "api", "-k upload"). Empty string runs all tests.
+      default: ""
 
   tasks:
     # ── EaaS space ───────────────────────────────────────────────────────
@@ -614,9 +625,12 @@ spec:
       params:
         - name: SNAPSHOT
           value: $(params.SNAPSHOT)
+        - name: TEST_FILTER
+          value: $(params.TEST_FILTER)
       taskSpec:
         params:
           - name: SNAPSHOT
+          - name: TEST_FILTER
         volumes:
           - name: credentials
             emptyDir: {}
@@ -663,6 +677,8 @@ spec:
                 value: "/credentials/$(steps.get-hub-kubeconfig.results.kubeconfig)"
               - name: MANAGED_KUBECONFIG
                 value: "/credentials/$(steps.get-managed-kubeconfig.results.kubeconfig)"
+              - name: TEST_FILTER
+                value: "$(params.TEST_FILTER)"
             volumeMounts:
               - name: credentials
                 mountPath: /credentials
@@ -671,7 +687,12 @@ spec:
               #!/usr/bin/env bash
               set -euo pipefail
 
-              echo "=== IOP E2E Smoke Tests ==="
+              if [[ -n "${TEST_FILTER}" ]]; then
+                echo "=== IOP E2E Tests (filter: ${TEST_FILTER}) ==="
+              else
+                echo "=== IOP E2E Tests (all) ==="
+              fi
+              # TODO: use TEST_FILTER to select which tests to run
 
               PASS=0
               FAIL=0
@@ -734,3 +755,133 @@ spec:
                 oc get managedcluster managed -o yaml 2>/dev/null || true
                 exit 1
               fi
+
+  # ── Hold clusters on failure (opt-in) ────────────────────────────────
+  # When DEBUG_HOLD_ON_FAILURE is "true" and any task fails, prints
+  # cluster credentials and sleeps forever to keep the PipelineRun
+  # (and its EaaS clusters) alive. Konflux kills the task when the
+  # ITS finally_timeout is reached. Cancel the PipelineRun manually
+  # when done debugging.
+  #
+  # Requires ITS timeout annotations in konflux-release-data:
+  #   test.appstudio.openshift.io/pipeline_timeout: "4h"
+  #   test.appstudio.openshift.io/tasks_timeout: "2h"
+  #   test.appstudio.openshift.io/finally_timeout: "2h"
+  finally:
+    - name: hold-clusters-on-failure
+      when:
+        - input: "$(tasks.status)"
+          operator: in
+          values: ["Failed"]
+        - input: "$(params.DEBUG_HOLD_ON_FAILURE)"
+          operator: in
+          values: ["true"]
+      taskSpec:
+        volumes:
+          - name: credentials
+            emptyDir: {}
+        steps:
+          - name: get-hub-kubeconfig
+            ref:
+              resolver: git
+              params:
+                - name: url
+                  value: https://github.com/konflux-ci/build-definitions.git
+                - name: revision
+                  value: main
+                - name: pathInRepo
+                  value: stepactions/eaas-get-ephemeral-cluster-credentials/0.1/eaas-get-ephemeral-cluster-credentials.yaml
+            params:
+              - name: eaasSpaceSecretRef
+                value: $(tasks.eaas-provision-space.results.secretRef)
+              - name: clusterName
+                value: "$(tasks.provision-hub.results.clusterName)"
+              - name: credentials
+                value: credentials
+
+          - name: get-managed-kubeconfig
+            ref:
+              resolver: git
+              params:
+                - name: url
+                  value: https://github.com/konflux-ci/build-definitions.git
+                - name: revision
+                  value: main
+                - name: pathInRepo
+                  value: stepactions/eaas-get-ephemeral-cluster-credentials/0.1/eaas-get-ephemeral-cluster-credentials.yaml
+            params:
+              - name: eaasSpaceSecretRef
+                value: $(tasks.eaas-provision-space.results.secretRef)
+              - name: clusterName
+                value: "$(tasks.provision-managed.results.clusterName)"
+              - name: credentials
+                value: credentials
+
+          - name: print-credentials-and-wait
+            env:
+              - name: HUB_API_SERVER_URL
+                value: "$(steps.get-hub-kubeconfig.results.apiServerURL)"
+              - name: HUB_CONSOLE_URL
+                value: "$(steps.get-hub-kubeconfig.results.consoleURL)"
+              - name: HUB_USERNAME
+                value: "$(steps.get-hub-kubeconfig.results.username)"
+              - name: HUB_PASSWORD_PATH
+                value: "$(steps.get-hub-kubeconfig.results.passwordPath)"
+              - name: HUB_KUBECONFIG_PATH
+                value: "$(steps.get-hub-kubeconfig.results.kubeconfig)"
+              - name: MANAGED_API_SERVER_URL
+                value: "$(steps.get-managed-kubeconfig.results.apiServerURL)"
+              - name: MANAGED_CONSOLE_URL
+                value: "$(steps.get-managed-kubeconfig.results.consoleURL)"
+              - name: MANAGED_USERNAME
+                value: "$(steps.get-managed-kubeconfig.results.username)"
+              - name: MANAGED_PASSWORD_PATH
+                value: "$(steps.get-managed-kubeconfig.results.passwordPath)"
+              - name: MANAGED_KUBECONFIG_PATH
+                value: "$(steps.get-managed-kubeconfig.results.kubeconfig)"
+            volumeMounts:
+              - name: credentials
+                mountPath: /credentials
+            image: registry.redhat.io/openshift4/ose-cli:latest
+            script: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+
+              echo "############################################################"
+              echo "# PIPELINE FAILED — cluster credentials for debugging      #"
+              echo "# Cancel this PipelineRun when you are done.               #"
+              echo "# Clusters auto-destroy 2h after creation regardless.      #"
+              echo "############################################################"
+
+              echo ""
+              echo "=== HUB CLUSTER ==="
+              echo "API Server:  ${HUB_API_SERVER_URL}"
+              echo "Console:     ${HUB_CONSOLE_URL}"
+              echo "Username:    ${HUB_USERNAME}"
+              echo "Password:    $(cat "/credentials/${HUB_PASSWORD_PATH}")"
+              echo ""
+              echo "Login command:"
+              echo "  oc login ${HUB_API_SERVER_URL} -u ${HUB_USERNAME} -p $(cat "/credentials/${HUB_PASSWORD_PATH}") --insecure-skip-tls-verify"
+              echo ""
+              echo "Kubeconfig (base64 — decode and save to a file):"
+              base64 -w0 "/credentials/${HUB_KUBECONFIG_PATH}"; echo
+
+              echo ""
+              echo "=== MANAGED CLUSTER ==="
+              echo "API Server:  ${MANAGED_API_SERVER_URL}"
+              echo "Console:     ${MANAGED_CONSOLE_URL}"
+              echo "Username:    ${MANAGED_USERNAME}"
+              echo "Password:    $(cat "/credentials/${MANAGED_PASSWORD_PATH}")"
+              echo ""
+              echo "Login command:"
+              echo "  oc login ${MANAGED_API_SERVER_URL} -u ${MANAGED_USERNAME} -p $(cat "/credentials/${MANAGED_PASSWORD_PATH}") --insecure-skip-tls-verify"
+              echo ""
+              echo "Kubeconfig (base64 — decode and save to a file):"
+              base64 -w0 "/credentials/${MANAGED_KUBECONFIG_PATH}"; echo
+
+              echo ""
+              echo "############################################################"
+              echo "# Sleeping to keep clusters alive. Cancel the PipelineRun  #"
+              echo "# when you are done debugging.                             #"
+              echo "############################################################"
+              sleep infinity
