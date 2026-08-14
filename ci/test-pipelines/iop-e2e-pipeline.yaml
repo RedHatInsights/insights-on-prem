@@ -1,0 +1,736 @@
+# ITS managed via konflux-release-data (insights-on-prem-eaas-e2e)
+---
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  annotations:
+    pipelinesascode.tekton.dev/task: "[acm-install, import-managed-cluster, iop-deploy, iop-e2e-tests]"
+  name: iop-e2e-pipeline
+spec:
+  description: |
+    End-to-end test pipeline for Insights on Premise (IOP) using EaaS
+    ephemeral HyperShift clusters. Provisions a hub and managed cluster,
+    installs ACM from the GA catalog, deploys IOP, imports the managed
+    cluster, and runs smoke tests.
+  params:
+    - name: SNAPSHOT
+      description: Konflux application snapshot JSON.
+      default: '{"components": [{"name":"insights-on-prem", "containerImage": "SNAPSHOT_REQUIRED"}]}'
+      type: string
+    - name: test-name
+      description: Konflux integration test name.
+      default: iop-e2e-tests
+    - name: ACM_VERSION
+      description: >-
+        ACM release channel suffix (e.g. "2.13"). Must match a channel
+        available in the redhat-operators catalog on the target OCP version.
+      default: "2.13"
+    - name: OCP_VERSION_PREFIX
+      description: OCP version prefix for EaaS clusters. Must match a version supported by EaaS.
+      default: "4.17."
+    - name: DEBUG_DUMP_CREDENTIALS
+      description: >-
+        When "true", print cluster kubeconfigs and admin passwords to logs.
+        Only enable for debugging ephemeral test failures.
+      default: "false"
+
+  tasks:
+    # ── EaaS space ───────────────────────────────────────────────────────
+    - name: eaas-provision-space
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/konflux-ci/build-definitions.git
+          - name: revision
+            value: main
+          - name: pathInRepo
+            value: task/eaas-provision-space/0.1/eaas-provision-space.yaml
+      params:
+        - name: ownerKind
+          value: PipelineRun
+        - name: ownerName
+          value: $(context.pipelineRun.name)
+        - name: ownerUid
+          value: $(context.pipelineRun.uid)
+
+    # ── Hub cluster (m5.2xlarge) ─────────────────────────────────────────
+    - name: provision-hub
+      runAfter:
+        - eaas-provision-space
+      taskSpec:
+        results:
+          - name: clusterName
+            value: "$(steps.create-cluster.results.clusterName)"
+        steps:
+          - name: get-supported-versions
+            ref:
+              resolver: git
+              params:
+                - name: url
+                  value: https://github.com/konflux-ci/build-definitions.git
+                - name: revision
+                  value: main
+                - name: pathInRepo
+                  value: stepactions/eaas-get-supported-ephemeral-cluster-versions/0.1/eaas-get-supported-ephemeral-cluster-versions.yaml
+            params:
+              - name: eaasSpaceSecretRef
+                value: $(tasks.eaas-provision-space.results.secretRef)
+          - name: pick-version
+            ref:
+              resolver: git
+              params:
+                - name: url
+                  value: https://github.com/konflux-ci/build-definitions.git
+                - name: revision
+                  value: main
+                - name: pathInRepo
+                  value: stepactions/eaas-get-latest-openshift-version-by-prefix/0.1/eaas-get-latest-openshift-version-by-prefix.yaml
+            params:
+              - name: prefix
+                value: "$(params.OCP_VERSION_PREFIX)"
+          - name: create-cluster
+            ref:
+              resolver: git
+              params:
+                - name: url
+                  value: https://github.com/konflux-ci/build-definitions.git
+                - name: revision
+                  value: main
+                - name: pathInRepo
+                  value: stepactions/eaas-create-ephemeral-cluster-hypershift-aws/0.1/eaas-create-ephemeral-cluster-hypershift-aws.yaml
+            params:
+              - name: eaasSpaceSecretRef
+                value: $(tasks.eaas-provision-space.results.secretRef)
+              - name: version
+                value: "$(steps.pick-version.results.version)"
+              - name: instanceType
+                value: m5.2xlarge
+              - name: timeout
+                value: "40m"
+
+    # ── Managed cluster (m5.xlarge) ──────────────────────────────────────
+    - name: provision-managed
+      runAfter:
+        - eaas-provision-space
+      taskSpec:
+        results:
+          - name: clusterName
+            value: "$(steps.create-cluster.results.clusterName)"
+        steps:
+          - name: get-supported-versions
+            ref:
+              resolver: git
+              params:
+                - name: url
+                  value: https://github.com/konflux-ci/build-definitions.git
+                - name: revision
+                  value: main
+                - name: pathInRepo
+                  value: stepactions/eaas-get-supported-ephemeral-cluster-versions/0.1/eaas-get-supported-ephemeral-cluster-versions.yaml
+            params:
+              - name: eaasSpaceSecretRef
+                value: $(tasks.eaas-provision-space.results.secretRef)
+          - name: pick-version
+            ref:
+              resolver: git
+              params:
+                - name: url
+                  value: https://github.com/konflux-ci/build-definitions.git
+                - name: revision
+                  value: main
+                - name: pathInRepo
+                  value: stepactions/eaas-get-latest-openshift-version-by-prefix/0.1/eaas-get-latest-openshift-version-by-prefix.yaml
+            params:
+              - name: prefix
+                value: "$(params.OCP_VERSION_PREFIX)"
+          - name: create-cluster
+            ref:
+              resolver: git
+              params:
+                - name: url
+                  value: https://github.com/konflux-ci/build-definitions.git
+                - name: revision
+                  value: main
+                - name: pathInRepo
+                  value: stepactions/eaas-create-ephemeral-cluster-hypershift-aws/0.1/eaas-create-ephemeral-cluster-hypershift-aws.yaml
+            params:
+              - name: eaasSpaceSecretRef
+                value: $(tasks.eaas-provision-space.results.secretRef)
+              - name: version
+                value: "$(steps.pick-version.results.version)"
+              - name: instanceType
+                value: m5.xlarge
+              - name: timeout
+                value: "40m"
+
+    # ── Install ACM on hub ──────────────────────────────────────────────
+    - name: acm-install
+      runAfter:
+        - provision-hub
+      params:
+        - name: ACM_VERSION
+          value: "$(params.ACM_VERSION)"
+      taskSpec:
+        params:
+          - name: ACM_VERSION
+            type: string
+        volumes:
+          - name: credentials
+            emptyDir: {}
+        steps:
+          - name: get-hub-kubeconfig
+            ref:
+              resolver: git
+              params:
+                - name: url
+                  value: https://github.com/konflux-ci/build-definitions.git
+                - name: revision
+                  value: main
+                - name: pathInRepo
+                  value: stepactions/eaas-get-ephemeral-cluster-credentials/0.1/eaas-get-ephemeral-cluster-credentials.yaml
+            params:
+              - name: eaasSpaceSecretRef
+                value: $(tasks.eaas-provision-space.results.secretRef)
+              - name: clusterName
+                value: "$(tasks.provision-hub.results.clusterName)"
+              - name: credentials
+                value: credentials
+
+          - name: install-acm
+            env:
+              - name: KUBECONFIG
+                value: "/credentials/$(steps.get-hub-kubeconfig.results.kubeconfig)"
+              - name: ACM_VERSION
+                value: $(params.ACM_VERSION)
+            volumeMounts:
+              - name: credentials
+                mountPath: /credentials
+            image: registry.redhat.io/openshift4/ose-cli:latest
+            script: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+
+              echo "=== Install ACM (release-${ACM_VERSION}) ==="
+
+              cat <<EOF | oc apply -f -
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: open-cluster-management
+              ---
+              apiVersion: operators.coreos.com/v1
+              kind: OperatorGroup
+              metadata:
+                name: default
+                namespace: open-cluster-management
+              spec:
+                targetNamespaces:
+                  - open-cluster-management
+              ---
+              apiVersion: operators.coreos.com/v1alpha1
+              kind: Subscription
+              metadata:
+                name: acm-operator-subscription
+                namespace: open-cluster-management
+              spec:
+                channel: release-${ACM_VERSION}
+                installPlanApproval: Automatic
+                name: advanced-cluster-management
+                source: redhat-operators
+                sourceNamespace: openshift-marketplace
+              EOF
+
+              echo "Waiting for ACM CRDs..."
+              ELAPSED=0
+              until oc get crd multiclusterhubs.operator.open-cluster-management.io &>/dev/null; do
+                if [[ "$ELAPSED" -ge 600 ]]; then
+                  echo "ERROR: ACM CRDs not found after 10 minutes"
+                  echo "--- Subscription status ---"
+                  oc get subscription acm-operator-subscription -n open-cluster-management -o yaml 2>/dev/null || true
+                  echo "--- CSVs ---"
+                  oc get csv -n open-cluster-management 2>/dev/null || true
+                  echo "--- CatalogSource pods ---"
+                  oc get pods -n openshift-marketplace 2>/dev/null || true
+                  exit 1
+                fi
+                sleep 10
+                ELAPSED=$((ELAPSED + 10))
+              done
+
+              echo "Waiting for MCH operator pod..."
+              until oc get pod -n open-cluster-management -l name=multiclusterhub-operator \
+                --no-headers 2>/dev/null | grep -q .; do
+                sleep 5
+              done
+              oc wait pod -n open-cluster-management -l name=multiclusterhub-operator \
+                --for=condition=Ready --timeout=300s
+
+              echo "Creating MultiClusterHub CR..."
+              cat <<'MCH' | oc apply -f -
+              apiVersion: operator.open-cluster-management.io/v1
+              kind: MultiClusterHub
+              metadata:
+                name: multiclusterhub
+                namespace: open-cluster-management
+              spec:
+                overrides:
+                  components:
+                  - name: app-lifecycle
+                    enabled: false
+                  - name: search
+                    enabled: false
+                  - name: submariner-addon
+                    enabled: false
+                  - name: volsync
+                    enabled: false
+              MCH
+
+              echo "Waiting for MultiClusterHub to reach Running state (timeout: 900s)..."
+              ELAPSED=0
+              while true; do
+                PHASE=$(oc get multiclusterhub multiclusterhub -n open-cluster-management \
+                  -o jsonpath='{.status.phase}' 2>/dev/null || true)
+                if [[ "$PHASE" == "Running" ]]; then
+                  echo "MultiClusterHub is Running"
+                  break
+                fi
+                if [[ "$ELAPSED" -ge 900 ]]; then
+                  echo "ERROR: MCH not Running after 900s (current phase: ${PHASE})"
+                  oc get multiclusterhub multiclusterhub -n open-cluster-management -o yaml
+                  exit 1
+                fi
+                if [[ $((ELAPSED % 60)) -eq 0 ]]; then
+                  echo "  MCH phase: ${PHASE:-unknown} (${ELAPSED}s elapsed)"
+                fi
+                sleep 15
+                ELAPSED=$((ELAPSED + 15))
+              done
+
+              echo "=== ACM installation complete ==="
+
+    # ── Import managed cluster into ACM hub ──────────────────────────────
+    - name: import-managed-cluster
+      runAfter:
+        - acm-install
+        - provision-managed
+      params:
+        - name: DEBUG_DUMP_CREDENTIALS
+          value: "$(params.DEBUG_DUMP_CREDENTIALS)"
+      taskSpec:
+        params:
+          - name: DEBUG_DUMP_CREDENTIALS
+            type: string
+        volumes:
+          - name: credentials
+            emptyDir: {}
+        steps:
+          - name: get-hub-kubeconfig
+            ref:
+              resolver: git
+              params:
+                - name: url
+                  value: https://github.com/konflux-ci/build-definitions.git
+                - name: revision
+                  value: main
+                - name: pathInRepo
+                  value: stepactions/eaas-get-ephemeral-cluster-credentials/0.1/eaas-get-ephemeral-cluster-credentials.yaml
+            params:
+              - name: eaasSpaceSecretRef
+                value: $(tasks.eaas-provision-space.results.secretRef)
+              - name: clusterName
+                value: "$(tasks.provision-hub.results.clusterName)"
+              - name: credentials
+                value: credentials
+
+          - name: get-managed-kubeconfig
+            ref:
+              resolver: git
+              params:
+                - name: url
+                  value: https://github.com/konflux-ci/build-definitions.git
+                - name: revision
+                  value: main
+                - name: pathInRepo
+                  value: stepactions/eaas-get-ephemeral-cluster-credentials/0.1/eaas-get-ephemeral-cluster-credentials.yaml
+            params:
+              - name: eaasSpaceSecretRef
+                value: $(tasks.eaas-provision-space.results.secretRef)
+              - name: clusterName
+                value: "$(tasks.provision-managed.results.clusterName)"
+              - name: credentials
+                value: credentials
+
+          - name: dump-credentials
+            env:
+              - name: DEBUG_DUMP_CREDENTIALS
+                value: "$(params.DEBUG_DUMP_CREDENTIALS)"
+              - name: HUB_API_SERVER_URL
+                value: "$(steps.get-hub-kubeconfig.results.apiServerURL)"
+              - name: HUB_CONSOLE_URL
+                value: "$(steps.get-hub-kubeconfig.results.consoleURL)"
+              - name: HUB_USERNAME
+                value: "$(steps.get-hub-kubeconfig.results.username)"
+              - name: HUB_PASSWORD_PATH
+                value: "$(steps.get-hub-kubeconfig.results.passwordPath)"
+              - name: HUB_KUBECONFIG_PATH
+                value: "$(steps.get-hub-kubeconfig.results.kubeconfig)"
+              - name: MANAGED_API_SERVER_URL
+                value: "$(steps.get-managed-kubeconfig.results.apiServerURL)"
+              - name: MANAGED_CONSOLE_URL
+                value: "$(steps.get-managed-kubeconfig.results.consoleURL)"
+              - name: MANAGED_USERNAME
+                value: "$(steps.get-managed-kubeconfig.results.username)"
+              - name: MANAGED_PASSWORD_PATH
+                value: "$(steps.get-managed-kubeconfig.results.passwordPath)"
+              - name: MANAGED_KUBECONFIG_PATH
+                value: "$(steps.get-managed-kubeconfig.results.kubeconfig)"
+            volumeMounts:
+              - name: credentials
+                mountPath: /credentials
+            image: registry.redhat.io/openshift4/ose-cli:latest
+            script: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+
+              if [[ "${DEBUG_DUMP_CREDENTIALS}" != "true" ]]; then
+                echo "DEBUG_DUMP_CREDENTIALS is not 'true' — skipping."
+                exit 0
+              fi
+
+              echo "############################################################"
+              echo "# WARNING: cluster admin credentials follow.               #"
+              echo "# Ephemeral clusters are destroyed when this run ends.     #"
+              echo "############################################################"
+
+              echo "=== HUB CLUSTER ==="
+              echo "API Server:  ${HUB_API_SERVER_URL}"
+              echo "Console:     ${HUB_CONSOLE_URL}"
+              echo "Username:    ${HUB_USERNAME}"
+              echo "--- HUB password ---"
+              cat "/credentials/${HUB_PASSWORD_PATH}"; echo
+              echo "--- HUB kubeconfig (base64) ---"
+              base64 -w0 "/credentials/${HUB_KUBECONFIG_PATH}"; echo
+
+              echo "=== MANAGED CLUSTER ==="
+              echo "API Server:  ${MANAGED_API_SERVER_URL}"
+              echo "Console:     ${MANAGED_CONSOLE_URL}"
+              echo "Username:    ${MANAGED_USERNAME}"
+              echo "--- MANAGED password ---"
+              cat "/credentials/${MANAGED_PASSWORD_PATH}"; echo
+              echo "--- MANAGED kubeconfig (base64) ---"
+              base64 -w0 "/credentials/${MANAGED_KUBECONFIG_PATH}"; echo
+
+          - name: import-cluster
+            env:
+              - name: KUBECONFIG
+                value: "/credentials/$(steps.get-hub-kubeconfig.results.kubeconfig)"
+              - name: MANAGED_KUBECONFIG
+                value: "/credentials/$(steps.get-managed-kubeconfig.results.kubeconfig)"
+            volumeMounts:
+              - name: credentials
+                mountPath: /credentials
+            image: registry.redhat.io/openshift4/ose-cli:latest
+            script: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+
+              echo "=== Import managed cluster ==="
+
+              oc create namespace managed --dry-run=client -o yaml | oc apply -f -
+
+              cat <<'MC' | oc apply -f -
+              apiVersion: cluster.open-cluster-management.io/v1
+              kind: ManagedCluster
+              metadata:
+                name: managed
+                labels:
+                  cloud: auto-detect
+                  vendor: auto-detect
+              spec:
+                hubAcceptsClient: true
+              MC
+
+              oc create secret generic auto-import-secret \
+                -n managed \
+                --from-file=kubeconfig="${MANAGED_KUBECONFIG}" \
+                --dry-run=client -o yaml | oc apply -f -
+
+              echo "Waiting for managed cluster to be Available..."
+              oc wait managedcluster managed \
+                --for=condition=ManagedClusterConditionAvailable=True \
+                --timeout=300s || {
+                echo "ERROR: Managed cluster not Available"
+                oc get managedcluster managed -o yaml
+                oc --kubeconfig="${MANAGED_KUBECONFIG}" get pods -n open-cluster-management-agent -o wide || true
+                exit 1
+              }
+
+              echo "Waiting for addon deployment to spoke..."
+              ELAPSED=0
+              until oc get managedclusteraddon insights-operator-proxy -n managed &>/dev/null; do
+                if [[ "$ELAPSED" -ge 300 ]]; then
+                  echo "WARNING: insights-operator-proxy addon not deployed after 5 minutes"
+                  echo "--- ClusterManagementAddOn ---"
+                  oc get clustermanagementaddon insights-operator-proxy -o yaml 2>/dev/null || true
+                  echo "--- ManagedClusterAddOns in managed ---"
+                  oc get managedclusteraddon -n managed 2>/dev/null || true
+                  break
+                fi
+                sleep 10
+                ELAPSED=$((ELAPSED + 10))
+              done
+
+              if oc get managedclusteraddon insights-operator-proxy -n managed &>/dev/null; then
+                echo "Addon CR exists. Waiting for Available condition..."
+                oc wait managedclusteraddon insights-operator-proxy -n managed \
+                  --for=condition=Available=True --timeout=300s || {
+                  echo "WARNING: Addon not Available yet — continuing"
+                  oc get managedclusteraddon insights-operator-proxy -n managed -o yaml || true
+                }
+              fi
+
+              echo "=== Managed cluster import complete ==="
+
+    # ── Deploy IOP on hub ────────────────────────────────────────────────
+    - name: iop-deploy
+      runAfter:
+        - acm-install
+      params:
+        - name: SNAPSHOT
+          value: $(params.SNAPSHOT)
+      taskSpec:
+        params:
+          - name: SNAPSHOT
+        volumes:
+          - name: credentials
+            emptyDir: {}
+        steps:
+          - name: get-hub-kubeconfig
+            ref:
+              resolver: git
+              params:
+                - name: url
+                  value: https://github.com/konflux-ci/build-definitions.git
+                - name: revision
+                  value: main
+                - name: pathInRepo
+                  value: stepactions/eaas-get-ephemeral-cluster-credentials/0.1/eaas-get-ephemeral-cluster-credentials.yaml
+            params:
+              - name: eaasSpaceSecretRef
+                value: $(tasks.eaas-provision-space.results.secretRef)
+              - name: clusterName
+                value: "$(tasks.provision-hub.results.clusterName)"
+              - name: credentials
+                value: credentials
+
+          - name: deploy-iop
+            env:
+              - name: SNAPSHOT
+                value: $(params.SNAPSHOT)
+              - name: KUBECONFIG
+                value: "/credentials/$(steps.get-hub-kubeconfig.results.kubeconfig)"
+            volumeMounts:
+              - name: credentials
+                mountPath: /credentials
+            image: registry.redhat.io/openshift4/ose-cli:latest
+            script: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+
+              echo "Installing dependencies..."
+              dnf -y install jq git >/dev/null 2>&1
+
+              echo "=== Deploy IOP ==="
+
+              echo "Cloning IOP repository from SNAPSHOT..."
+              GIT_URL=$(echo "${SNAPSHOT}" | jq -r '.components[] | select(.name == "insights-on-prem") | .source.git.url')
+              GIT_REVISION=$(echo "${SNAPSHOT}" | jq -r '.components[] | select(.name == "insights-on-prem") | .source.git.revision')
+              echo "Source: ${GIT_URL} @ ${GIT_REVISION}"
+              git clone -q "${GIT_URL}" /tmp/iop
+              cd /tmp/iop
+              git checkout -q "${GIT_REVISION}"
+
+              echo "Applying IOP deploy manifests..."
+              oc apply -f deploy/
+
+              IOP_IMAGE=$(echo "${SNAPSHOT}" | jq -r '.components[] | select(.name == "insights-on-prem") | .containerImage')
+              echo "Overriding IOP image: ${IOP_IMAGE}"
+              oc set image deployment/insights-on-prem -n insights-on-prem \
+                "insights-on-prem=${IOP_IMAGE}"
+
+              # The default imagePullSecrets references a secret that doesn't exist
+              # on ephemeral clusters. The Konflux-built image is public.
+              oc patch deployment insights-on-prem -n insights-on-prem --type json \
+                -p '[{"op":"remove","path":"/spec/template/spec/imagePullSecrets"}]' \
+                2>/dev/null || true
+
+              echo "Waiting for cert-manager operator..."
+              ELAPSED=0
+              until oc get deployment cert-manager -n cert-manager &>/dev/null; do
+                if [[ "$ELAPSED" -ge 600 ]]; then
+                  echo "ERROR: cert-manager deployment not found after 10 minutes"
+                  oc get csv -n cert-manager-operator 2>/dev/null || true
+                  exit 1
+                fi
+                sleep 10
+                ELAPSED=$((ELAPSED + 10))
+              done
+              oc rollout status deployment/cert-manager -n cert-manager --timeout=300s
+              echo "cert-manager is ready"
+
+              echo "Waiting for IOP cert secrets (created by ACM Policy + cert-manager)..."
+              ELAPSED=0
+              until oc get secret insights-on-prem-server-tls -n insights-on-prem &>/dev/null && \
+                    oc get secret insights-on-prem-client-ca -n insights-on-prem &>/dev/null; do
+                if [[ "$ELAPSED" -ge 600 ]]; then
+                  echo "ERROR: Cert secrets not created after 10 minutes"
+                  echo "--- Policies ---"
+                  oc get policy -n insights-on-prem 2>/dev/null || true
+                  echo "--- Certificates ---"
+                  oc get certificate -n insights-on-prem 2>/dev/null || true
+                  echo "--- cert-manager pods ---"
+                  oc get pods -n cert-manager 2>/dev/null || true
+                  exit 1
+                fi
+                sleep 10
+                ELAPSED=$((ELAPSED + 10))
+              done
+              echo "Cert secrets are ready"
+
+              echo "Waiting for PostgreSQL..."
+              oc rollout status deployment/insights-postgres -n insights-on-prem --timeout=120s
+
+              echo "Waiting for IOP deployment..."
+              oc rollout status deployment/insights-on-prem -n insights-on-prem --timeout=300s
+
+              echo "=== IOP deployment complete ==="
+
+    # ── Smoke tests ──────────────────────────────────────────────────────
+    - name: iop-e2e-tests
+      runAfter:
+        - iop-deploy
+        - import-managed-cluster
+      params:
+        - name: SNAPSHOT
+          value: $(params.SNAPSHOT)
+      taskSpec:
+        params:
+          - name: SNAPSHOT
+        volumes:
+          - name: credentials
+            emptyDir: {}
+        steps:
+          - name: get-hub-kubeconfig
+            ref:
+              resolver: git
+              params:
+                - name: url
+                  value: https://github.com/konflux-ci/build-definitions.git
+                - name: revision
+                  value: main
+                - name: pathInRepo
+                  value: stepactions/eaas-get-ephemeral-cluster-credentials/0.1/eaas-get-ephemeral-cluster-credentials.yaml
+            params:
+              - name: eaasSpaceSecretRef
+                value: $(tasks.eaas-provision-space.results.secretRef)
+              - name: clusterName
+                value: "$(tasks.provision-hub.results.clusterName)"
+              - name: credentials
+                value: credentials
+
+          - name: get-managed-kubeconfig
+            ref:
+              resolver: git
+              params:
+                - name: url
+                  value: https://github.com/konflux-ci/build-definitions.git
+                - name: revision
+                  value: main
+                - name: pathInRepo
+                  value: stepactions/eaas-get-ephemeral-cluster-credentials/0.1/eaas-get-ephemeral-cluster-credentials.yaml
+            params:
+              - name: eaasSpaceSecretRef
+                value: $(tasks.eaas-provision-space.results.secretRef)
+              - name: clusterName
+                value: "$(tasks.provision-managed.results.clusterName)"
+              - name: credentials
+                value: credentials
+
+          - name: run-tests
+            env:
+              - name: KUBECONFIG
+                value: "/credentials/$(steps.get-hub-kubeconfig.results.kubeconfig)"
+              - name: MANAGED_KUBECONFIG
+                value: "/credentials/$(steps.get-managed-kubeconfig.results.kubeconfig)"
+            volumeMounts:
+              - name: credentials
+                mountPath: /credentials
+            image: registry.redhat.io/openshift4/ose-cli:latest
+            script: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+
+              echo "=== IOP E2E Smoke Tests ==="
+
+              PASS=0
+              FAIL=0
+
+              check() {
+                local desc="$1"; shift
+                if "$@" >/dev/null 2>&1; then
+                  echo "  PASS: ${desc}"
+                  PASS=$((PASS + 1))
+                else
+                  echo "  FAIL: ${desc}"
+                  FAIL=$((FAIL + 1))
+                fi
+              }
+
+              echo "--- Hub cluster checks ---"
+              check "IOP deployment is Available" \
+                oc rollout status deployment/insights-on-prem -n insights-on-prem --timeout=10s
+              check "PostgreSQL deployment is Available" \
+                oc rollout status deployment/insights-postgres -n insights-on-prem --timeout=10s
+              check "IOP Route exists" \
+                oc get route insights-on-prem -n insights-on-prem
+              check "cert-manager operator is running" \
+                oc rollout status deployment/cert-manager -n cert-manager --timeout=10s
+              check "Server TLS secret exists" \
+                oc get secret insights-on-prem-server-tls -n insights-on-prem
+              check "Client CA secret exists" \
+                oc get secret insights-on-prem-client-ca -n insights-on-prem
+
+              echo "--- ACM checks ---"
+              check "MultiClusterHub is Running" \
+                test "$(oc get multiclusterhub multiclusterhub -n open-cluster-management \
+                  -o jsonpath='{.status.phase}')" = "Running"
+              check "Managed cluster is Available" \
+                oc get managedcluster managed
+
+              echo "--- Managed cluster checks ---"
+              check "Klusterlet agent is running on managed" \
+                oc --kubeconfig="${MANAGED_KUBECONFIG}" get pods -n open-cluster-management-agent \
+                  --field-selector=status.phase=Running
+
+              # TODO: Add actual e2e API tests:
+              # - Health check via IOP pod exec (mTLS prevents external curl)
+              # - Archive upload (POST /api/ingress/v1/upload)
+              # - Report retrieval (GET /api/v2/cluster/{id}/reports)
+              # - Spoke proxy connectivity
+              # - Insights Operator reconfiguration verification
+              echo "--- Placeholder: API tests not yet implemented ---"
+
+              echo ""
+              echo "=== Results: ${PASS} passed, ${FAIL} failed ==="
+
+              if [[ "$FAIL" -gt 0 ]]; then
+                echo "Some checks failed — dumping diagnostic info"
+                echo "--- IOP pods ---"
+                oc get pods -n insights-on-prem -o wide
+                echo "--- IOP deployment events ---"
+                oc describe deployment insights-on-prem -n insights-on-prem | tail -20
+                echo "--- Managed cluster status ---"
+                oc get managedcluster managed -o yaml 2>/dev/null || true
+                exit 1
+              fi
