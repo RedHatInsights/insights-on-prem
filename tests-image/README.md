@@ -26,7 +26,7 @@ curl -kL https://downloads-openshift-console.apps.<cluster>/amd64/linux/oc.tar.g
 
 The test image has two Tekton pipelines in `.tekton/`:
 
-- **`insights-on-prem-tests-push.yaml`** -- Builds and pushes the image on merge to `master`. Only triggers when `tests/Dockerfile` or `tests/requirements.txt` change.
+- **`insights-on-prem-tests-push.yaml`** -- Builds and pushes the image on merge to `main`. Only triggers when `tests/Dockerfile` or `tests/requirements.txt` change.
 - **`insights-on-prem-tests-pull-request.yaml`** -- Build validation only. Verifies the Dockerfile builds successfully on PRs but the resulting image is not used for testing. Security scans are skipped. Only triggers when `tests/Dockerfile` or `tests/requirements.txt` change.
 
 ### Image Location
