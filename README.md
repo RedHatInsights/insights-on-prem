@@ -217,10 +217,11 @@ After deploying Insights on Prem on a healthy cluster, the Fleet Overview panels
 
 ![ACM Fleet Overview - Insights section not showing any results](docs/fleet-overview-empty.png)
 
-In case you want to quickly trigger some results, you can run `test_ui.sh` with the hub cluster kubeconfig. The script will execute changes on cluster (uploading metrics, creatings resources) in order to trigger both upgrade risk predictions and cluster recommendations for the hub cluster:
+In case you want to quickly trigger some results, you can run `populate-sample-data.sh` with the hub cluster kubeconfig. The script will execute changes on cluster (uploading metrics, creating resources) in order to trigger both upgrade risk predictions and cluster recommendations for the hub cluster:
+
 
 ```bash
-./test_ui.sh
+./populate-sample-data.sh
 ```
 
 If you want to revert the changes, see the script comments for cleanup instructions.
