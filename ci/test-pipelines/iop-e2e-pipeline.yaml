@@ -33,17 +33,6 @@ spec:
         When "true", print cluster kubeconfigs and admin passwords to logs.
         Only enable for debugging ephemeral test failures.
       default: "false"
-    - name: DEBUG_HOLD_ON_FAILURE
-      description: >-
-        When "true", keep clusters alive after a pipeline failure by
-        sleeping in a finally task. Credentials are printed to logs so
-        you can oc login. Cancel the PipelineRun when done debugging.
-      default: "false"
-    - name: TEST_FILTER
-      description: >-
-        Test filter expression passed to the e2e test runner (e.g.
-        "smoke", "api", "-k upload"). Empty string runs all tests.
-      default: ""
 
   tasks:
     # ── EaaS space ───────────────────────────────────────────────────────
@@ -625,16 +614,42 @@ spec:
       params:
         - name: SNAPSHOT
           value: $(params.SNAPSHOT)
-        - name: TEST_FILTER
-          value: $(params.TEST_FILTER)
+        - name: PIPELINE_RUN_NAME
+          value: $(context.pipelineRun.name)
+        - name: PIPELINE_RUN_NAMESPACE
+          value: $(context.pipelineRun.namespace)
       taskSpec:
         params:
           - name: SNAPSHOT
-          - name: TEST_FILTER
+          - name: PIPELINE_RUN_NAME
+          - name: PIPELINE_RUN_NAMESPACE
         volumes:
           - name: credentials
             emptyDir: {}
         steps:
+          - name: read-test-filter
+            env:
+              - name: PIPELINE_RUN_NAME
+                value: "$(params.PIPELINE_RUN_NAME)"
+              - name: PIPELINE_RUN_NAMESPACE
+                value: "$(params.PIPELINE_RUN_NAMESPACE)"
+            volumeMounts:
+              - name: credentials
+                mountPath: /credentials
+            image: registry.redhat.io/openshift4/ose-cli:latest
+            script: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+              FILTER=$(oc get pipelinerun "${PIPELINE_RUN_NAME}" \
+                -n "${PIPELINE_RUN_NAMESPACE}" \
+                -o jsonpath='{.metadata.labels.debug\.iop/test-filter}' 2>/dev/null || true)
+              echo -n "${FILTER}" > /credentials/test-filter
+              if [[ -n "${FILTER}" ]]; then
+                echo "Test filter from PipelineRun label: ${FILTER}"
+              else
+                echo "No test filter set — running all tests"
+              fi
+
           - name: get-hub-kubeconfig
             ref:
               resolver: git
@@ -677,8 +692,6 @@ spec:
                 value: "/credentials/$(steps.get-hub-kubeconfig.results.kubeconfig)"
               - name: MANAGED_KUBECONFIG
                 value: "/credentials/$(steps.get-managed-kubeconfig.results.kubeconfig)"
-              - name: TEST_FILTER
-                value: "$(params.TEST_FILTER)"
             volumeMounts:
               - name: credentials
                 mountPath: /credentials
@@ -687,6 +700,7 @@ spec:
               #!/usr/bin/env bash
               set -euo pipefail
 
+              TEST_FILTER=$(cat /credentials/test-filter 2>/dev/null || true)
               if [[ -n "${TEST_FILTER}" ]]; then
                 echo "=== IOP E2E Tests (filter: ${TEST_FILTER}) ==="
               else
@@ -756,12 +770,16 @@ spec:
                 exit 1
               fi
 
-  # ── Hold clusters on failure (opt-in) ────────────────────────────────
-  # When DEBUG_HOLD_ON_FAILURE is "true" and any task fails, prints
-  # cluster credentials and sleeps forever to keep the PipelineRun
-  # (and its EaaS clusters) alive. Konflux kills the task when the
+  # ── Hold clusters on failure (opt-in via PipelineRun label) ──────────
+  # When any task fails, checks the PipelineRun for a
+  # "debug.iop/hold-on-failure=true" label. If set, prints cluster
+  # credentials and sleeps forever. Konflux kills the task when the
   # ITS finally_timeout is reached. Cancel the PipelineRun manually
   # when done debugging.
+  #
+  # The label is read at runtime from the PipelineRun metadata, so it
+  # can be added while the pipeline is running (before failure occurs).
+  # See ci/README.md for why labels are used instead of pipeline params.
   #
   # Requires ITS timeout annotations in konflux-release-data:
   #   test.appstudio.openshift.io/pipeline_timeout: "4h"
@@ -773,14 +791,44 @@ spec:
         - input: "$(tasks.status)"
           operator: in
           values: ["Failed"]
-        - input: "$(params.DEBUG_HOLD_ON_FAILURE)"
-          operator: in
-          values: ["true"]
+      params:
+        - name: PIPELINE_RUN_NAME
+          value: $(context.pipelineRun.name)
+        - name: PIPELINE_RUN_NAMESPACE
+          value: $(context.pipelineRun.namespace)
       taskSpec:
+        params:
+          - name: PIPELINE_RUN_NAME
+          - name: PIPELINE_RUN_NAMESPACE
         volumes:
           - name: credentials
             emptyDir: {}
         steps:
+          - name: check-hold-label
+            env:
+              - name: PIPELINE_RUN_NAME
+                value: "$(params.PIPELINE_RUN_NAME)"
+              - name: PIPELINE_RUN_NAMESPACE
+                value: "$(params.PIPELINE_RUN_NAMESPACE)"
+            volumeMounts:
+              - name: credentials
+                mountPath: /credentials
+            image: registry.redhat.io/openshift4/ose-cli:latest
+            script: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+              HOLD=$(oc get pipelinerun "${PIPELINE_RUN_NAME}" \
+                -n "${PIPELINE_RUN_NAMESPACE}" \
+                -o jsonpath='{.metadata.labels.debug\.iop/hold-on-failure}' 2>/dev/null || true)
+              echo -n "${HOLD}" > /credentials/hold-on-failure
+              if [[ "${HOLD}" != "true" ]]; then
+                echo "Label debug.iop/hold-on-failure is not set — skipping credential dump."
+                echo "To hold clusters on failure, label the PipelineRun before it fails:"
+                echo "  oc label pipelinerun ${PIPELINE_RUN_NAME} -n ${PIPELINE_RUN_NAMESPACE} debug.iop/hold-on-failure=true"
+                exit 0
+              fi
+              echo "debug.iop/hold-on-failure=true — will dump credentials and hold."
+
           - name: get-hub-kubeconfig
             ref:
               resolver: git
@@ -846,6 +894,12 @@ spec:
             script: |
               #!/usr/bin/env bash
               set -euo pipefail
+
+              HOLD=$(cat /credentials/hold-on-failure 2>/dev/null || true)
+              if [[ "${HOLD}" != "true" ]]; then
+                echo "Hold not requested — exiting."
+                exit 0
+              fi
 
               echo "############################################################"
               echo "# PIPELINE FAILED — cluster credentials for debugging      #"
