@@ -1,0 +1,89 @@
+"""Single-thread worker that processes uploaded archives from a queue."""
+
+import logging
+import os
+from queue import Queue
+from threading import Thread
+
+from sqlalchemy.orm import sessionmaker
+
+from app.services.processor_service import ProcessorService
+
+logger = logging.getLogger(__name__)
+
+_STOP = None
+
+
+class ArchiveProcessor(Thread):
+    """Consume archive jobs from a multiprocessing Queue on a single thread."""
+
+    def __init__(
+        self,
+        processor_service: ProcessorService,
+        session_factory: sessionmaker,
+        queue: Queue | None = None,
+    ):
+        super().__init__(name="archive-processor", daemon=True)
+        self.processor_service = processor_service
+        self.session_factory = session_factory
+        self.queue: Queue = queue if queue is not None else Queue()
+        self._stop_requested = False
+
+    def run(self) -> None:
+        logger.info("Archive processor thread started")
+        while True:
+            job = self.queue.get()
+            if job is _STOP:
+                logger.info("Archive processor thread stopping")
+                break
+            try:
+                temp_file_path, request_id = job
+                self._process_job(temp_file_path, request_id)
+            except Exception as e:
+                logger.error(f"Archive processor: unexpected error: {e}", exc_info=True)
+        logger.info("Archive processor thread stopped")
+
+    def _process_job(self, temp_file_path: str, request_id: str) -> None:
+        try:
+            db = self.session_factory()
+            try:
+                cluster_id, rules_count = self.processor_service.process_archive(
+                    db, temp_file_path, request_id
+                )
+                logger.info(
+                    f"Request {request_id}: Successfully processed cluster {cluster_id} "
+                    f"with {rules_count} rules"
+                )
+            except Exception as e:
+                logger.error(
+                    f"Request {request_id}: Archive processing failed: {e}",
+                    exc_info=True,
+                )
+            finally:
+                db.close()
+        finally:
+            if os.path.exists(temp_file_path):
+                try:
+                    os.remove(temp_file_path)
+                    logger.debug(f"Cleaned up temporary file: {temp_file_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to clean up temporary file: {e}")
+
+    def stop(self, timeout: float | None = None) -> bool:
+        """Enqueue a stop sentinel and wait for the worker thread to exit.
+
+        :param timeout: Seconds to wait for the thread to finish
+        :return: True if the thread stopped within the timeout
+        """
+        if self.ident is None:
+            return True
+
+        if not self._stop_requested:
+            self._stop_requested = True
+            self.queue.put(_STOP)
+        self.join(timeout)
+        stopped = not self.is_alive()
+        if stopped:
+            self.queue.close()
+            self.queue.join_thread()
+        return stopped

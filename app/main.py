@@ -12,7 +12,6 @@ from datetime import datetime, timedelta, timezone
 
 import uvicorn
 from fastapi import (
-    BackgroundTasks,
     Depends,
     FastAPI,
     File,
@@ -39,13 +38,13 @@ from app.schemas import (
     SimplifiedRuleHit,
     UploadResponse,
 )
+from app.services.archive_processor import ArchiveProcessor
 from app.services.content_service import ContentService
 from app.services.processor_service import ProcessorService
 from app.services.report_service import ReportService
 from app.services.thanos_service import ThanosService
 from app.services.upgrade_prediction_service import UpgradePredictionService
 from app.services.upload_service import UploadService
-from app.utils.task_tracker import BackgroundTaskTracker
 
 logger = logging.getLogger(__name__)
 
@@ -72,14 +71,10 @@ async def lifespan(app: FastAPI):
     # Initialize processor config and components
     load_insights_components(config)
 
-    task_tracker = BackgroundTaskTracker()
-    app.state.processor_service = ProcessorService(config)
-    app.state.upload_service = UploadService(
-        app.state.processor_service,
-        config,
-        session_factory,
-        task_tracker=task_tracker,
-    )
+    processor_service = ProcessorService(config)
+    archive_processor = ArchiveProcessor(processor_service, session_factory)
+    archive_processor.start()
+    app.state.upload_service = UploadService(config, archive_processor.queue)
     app.state.content_service = ContentService(YAMLContentParser())
     app.state.report_service = ReportService(app.state.content_service)
     app.state.thanos_service = ThanosService(config)
@@ -90,15 +85,12 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    logger.info("Shutting down: waiting for in-flight background tasks...")
-    drained = await asyncio.to_thread(task_tracker.wait_until_idle, 270)
+    logger.info("Shutting down: waiting for archive processor to drain...")
+    drained = await asyncio.to_thread(archive_processor.stop, 270)
     if drained:
-        logger.info("All background tasks finished")
+        logger.info("Archive processor stopped")
     else:
-        logger.warning(
-            "Shutdown timeout: %d background tasks still running",
-            task_tracker.active_count,
-        )
+        logger.warning("Shutdown timeout: archive processor still running")
 
     cleanup_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
@@ -173,14 +165,12 @@ async def health_check():
 async def upload_archive(
     request: Request,
     response: Response,
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),  # noqa: B008
 ):
     """
     Upload and process Red Hat Insights archive.
 
     :param file: Uploaded archive file (tar, tar.gz, or tgz format)
-    :param background_tasks: FastAPI background tasks
     :return: UploadResponse with accepted status
     :raises HTTPException: On validation errors
     """
@@ -189,9 +179,7 @@ async def upload_archive(
     request_id = str(uuid.uuid4())
 
     try:
-        upload_response = await upload_service.process_upload(
-            background_tasks, file, request_id
-        )
+        upload_response = await upload_service.process_upload(file, request_id)
         response.headers["x-rh-insights-request-id"] = request_id
         return upload_response
 
