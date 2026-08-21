@@ -8,7 +8,7 @@ metadata:
   name: iop-e2e-pipeline
 spec:
   description: |
-    End-to-end test pipeline for Insights on Premise (IOP) using EaaS
+    End-to-end test pipeline for Insights on Premise (IOP) using OpenShift CI
     ephemeral HyperShift clusters. Provisions a hub and managed cluster,
     installs ACM from the GA catalog, deploys IOP, imports the managed
     cluster, and runs smoke tests.
@@ -25,9 +25,11 @@ spec:
         ACM release channel suffix (e.g. "2.13"). Must match a channel
         available in the redhat-operators catalog on the target OCP version.
       default: "2.13"
-    - name: OCP_VERSION_PREFIX
-      description: OCP version prefix for EaaS clusters. Must match a version supported by EaaS.
-      default: "4.17."
+    - name: OCP_VERSION
+      description: >-
+        OCP version for ephemeral clusters (e.g. "4.17"). Used as the
+        release channel version in the OpenShift CI provisioning request.
+      default: "4.21"
     - name: DEBUG_DUMP_CREDENTIALS
       description: >-
         When "true", print cluster kubeconfigs and admin passwords to logs.
@@ -35,134 +37,55 @@ spec:
       default: "false"
 
   tasks:
-    # ── EaaS space ───────────────────────────────────────────────────────
-    - name: eaas-provision-space
+    # ── Hub cluster (m5.2xlarge) ─────────────────────────────────────────
+    - name: provision-hub
       taskRef:
         resolver: git
         params:
           - name: url
-            value: https://github.com/konflux-ci/build-definitions.git
+            value: https://github.com/openshift/konflux-tasks
           - name: revision
             value: main
           - name: pathInRepo
-            value: task/eaas-provision-space/0.1/eaas-provision-space.yaml
+            value: tasks/provision-ephemeral-cluster/0.1/provision-ephemeral-cluster.yaml
       params:
-        - name: ownerKind
-          value: PipelineRun
         - name: ownerName
           value: $(context.pipelineRun.name)
         - name: ownerUid
           value: $(context.pipelineRun.uid)
-
-    # ── Hub cluster (m5.2xlarge) ─────────────────────────────────────────
-    - name: provision-hub
-      runAfter:
-        - eaas-provision-space
-      taskSpec:
-        results:
-          - name: clusterName
-            value: "$(steps.create-cluster.results.clusterName)"
-        steps:
-          - name: get-supported-versions
-            ref:
-              resolver: git
-              params:
-                - name: url
-                  value: https://github.com/konflux-ci/build-definitions.git
-                - name: revision
-                  value: main
-                - name: pathInRepo
-                  value: stepactions/eaas-get-supported-ephemeral-cluster-versions/0.1/eaas-get-supported-ephemeral-cluster-versions.yaml
-            params:
-              - name: eaasSpaceSecretRef
-                value: $(tasks.eaas-provision-space.results.secretRef)
-          - name: pick-version
-            ref:
-              resolver: git
-              params:
-                - name: url
-                  value: https://github.com/konflux-ci/build-definitions.git
-                - name: revision
-                  value: main
-                - name: pathInRepo
-                  value: stepactions/eaas-get-latest-openshift-version-by-prefix/0.1/eaas-get-latest-openshift-version-by-prefix.yaml
-            params:
-              - name: prefix
-                value: "$(params.OCP_VERSION_PREFIX)"
-          - name: create-cluster
-            ref:
-              resolver: git
-              params:
-                - name: url
-                  value: https://github.com/konflux-ci/build-definitions.git
-                - name: revision
-                  value: main
-                - name: pathInRepo
-                  value: stepactions/eaas-create-ephemeral-cluster-hypershift-aws/0.1/eaas-create-ephemeral-cluster-hypershift-aws.yaml
-            params:
-              - name: eaasSpaceSecretRef
-                value: $(tasks.eaas-provision-space.results.secretRef)
-              - name: version
-                value: "$(steps.pick-version.results.version)"
-              - name: instanceType
-                value: m5.2xlarge
-              - name: timeout
-                value: "40m"
+        - name: workflow
+          value: hypershift-hostedcluster-workflow
+        - name: clusterProfile
+          value: aws-konflux-prod
+        - name: env
+          value: '{"COMPUTE_NODE_TYPE": "m5.2xlarge", "HYPERSHIFT_NODE_COUNT": "3", "HOSTED_MANAGEMENT_CLUSTER": "hosted-mgmt2"}'
+        - name: releases
+          value: '{"latest":{"release":{"channel":"stable","version":"$(params.OCP_VERSION)","architecture":"multi"}}}'
 
     # ── Managed cluster (m5.xlarge) ──────────────────────────────────────
     - name: provision-managed
-      runAfter:
-        - eaas-provision-space
-      taskSpec:
-        results:
-          - name: clusterName
-            value: "$(steps.create-cluster.results.clusterName)"
-        steps:
-          - name: get-supported-versions
-            ref:
-              resolver: git
-              params:
-                - name: url
-                  value: https://github.com/konflux-ci/build-definitions.git
-                - name: revision
-                  value: main
-                - name: pathInRepo
-                  value: stepactions/eaas-get-supported-ephemeral-cluster-versions/0.1/eaas-get-supported-ephemeral-cluster-versions.yaml
-            params:
-              - name: eaasSpaceSecretRef
-                value: $(tasks.eaas-provision-space.results.secretRef)
-          - name: pick-version
-            ref:
-              resolver: git
-              params:
-                - name: url
-                  value: https://github.com/konflux-ci/build-definitions.git
-                - name: revision
-                  value: main
-                - name: pathInRepo
-                  value: stepactions/eaas-get-latest-openshift-version-by-prefix/0.1/eaas-get-latest-openshift-version-by-prefix.yaml
-            params:
-              - name: prefix
-                value: "$(params.OCP_VERSION_PREFIX)"
-          - name: create-cluster
-            ref:
-              resolver: git
-              params:
-                - name: url
-                  value: https://github.com/konflux-ci/build-definitions.git
-                - name: revision
-                  value: main
-                - name: pathInRepo
-                  value: stepactions/eaas-create-ephemeral-cluster-hypershift-aws/0.1/eaas-create-ephemeral-cluster-hypershift-aws.yaml
-            params:
-              - name: eaasSpaceSecretRef
-                value: $(tasks.eaas-provision-space.results.secretRef)
-              - name: version
-                value: "$(steps.pick-version.results.version)"
-              - name: instanceType
-                value: m5.xlarge
-              - name: timeout
-                value: "40m"
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/openshift/konflux-tasks
+          - name: revision
+            value: main
+          - name: pathInRepo
+            value: tasks/provision-ephemeral-cluster/0.1/provision-ephemeral-cluster.yaml
+      params:
+        - name: ownerName
+          value: $(context.pipelineRun.name)
+        - name: ownerUid
+          value: $(context.pipelineRun.uid)
+        - name: workflow
+          value: hypershift-hostedcluster-workflow
+        - name: clusterProfile
+          value: aws-konflux-prod
+        - name: env
+          value: '{"COMPUTE_NODE_TYPE": "m5.xlarge", "HYPERSHIFT_NODE_COUNT": "3", "HOSTED_MANAGEMENT_CLUSTER": "hosted-mgmt2"}'
+        - name: releases
+          value: '{"latest":{"release":{"channel":"stable","version":"$(params.OCP_VERSION)","architecture":"multi"}}}'
 
     # ── Install ACM on hub ──────────────────────────────────────────────
     - name: acm-install
@@ -171,41 +94,29 @@ spec:
       params:
         - name: ACM_VERSION
           value: "$(params.ACM_VERSION)"
+        - name: hubClusterCredentialsSecretRef
+          value: $(tasks.provision-hub.results.secretRef)
       taskSpec:
         params:
           - name: ACM_VERSION
             type: string
+          - name: hubClusterCredentialsSecretRef
+            type: string
         volumes:
-          - name: credentials
-            emptyDir: {}
+          - name: hub-credentials
+            secret:
+              secretName: $(params.hubClusterCredentialsSecretRef)
         steps:
-          - name: get-hub-kubeconfig
-            ref:
-              resolver: git
-              params:
-                - name: url
-                  value: https://github.com/konflux-ci/build-definitions.git
-                - name: revision
-                  value: main
-                - name: pathInRepo
-                  value: stepactions/eaas-get-ephemeral-cluster-credentials/0.1/eaas-get-ephemeral-cluster-credentials.yaml
-            params:
-              - name: eaasSpaceSecretRef
-                value: $(tasks.eaas-provision-space.results.secretRef)
-              - name: clusterName
-                value: "$(tasks.provision-hub.results.clusterName)"
-              - name: credentials
-                value: credentials
-
           - name: install-acm
             env:
               - name: KUBECONFIG
-                value: "/credentials/$(steps.get-hub-kubeconfig.results.kubeconfig)"
+                value: /var/run/secrets/hub-cluster/kubeconfig
               - name: ACM_VERSION
                 value: $(params.ACM_VERSION)
             volumeMounts:
-              - name: credentials
-                mountPath: /credentials
+              - name: hub-credentials
+                mountPath: /var/run/secrets/hub-cluster
+                readOnly: true
             image: registry.redhat.io/openshift4/ose-cli:latest
             script: |
               #!/usr/bin/env bash
@@ -317,77 +228,37 @@ spec:
       params:
         - name: DEBUG_DUMP_CREDENTIALS
           value: "$(params.DEBUG_DUMP_CREDENTIALS)"
+        - name: hubClusterCredentialsSecretRef
+          value: $(tasks.provision-hub.results.secretRef)
+        - name: managedClusterCredentialsSecretRef
+          value: $(tasks.provision-managed.results.secretRef)
       taskSpec:
         params:
           - name: DEBUG_DUMP_CREDENTIALS
             type: string
+          - name: hubClusterCredentialsSecretRef
+            type: string
+          - name: managedClusterCredentialsSecretRef
+            type: string
         volumes:
-          - name: credentials
-            emptyDir: {}
+          - name: hub-credentials
+            secret:
+              secretName: $(params.hubClusterCredentialsSecretRef)
+          - name: managed-credentials
+            secret:
+              secretName: $(params.managedClusterCredentialsSecretRef)
         steps:
-          - name: get-hub-kubeconfig
-            ref:
-              resolver: git
-              params:
-                - name: url
-                  value: https://github.com/konflux-ci/build-definitions.git
-                - name: revision
-                  value: main
-                - name: pathInRepo
-                  value: stepactions/eaas-get-ephemeral-cluster-credentials/0.1/eaas-get-ephemeral-cluster-credentials.yaml
-            params:
-              - name: eaasSpaceSecretRef
-                value: $(tasks.eaas-provision-space.results.secretRef)
-              - name: clusterName
-                value: "$(tasks.provision-hub.results.clusterName)"
-              - name: credentials
-                value: credentials
-
-          - name: get-managed-kubeconfig
-            ref:
-              resolver: git
-              params:
-                - name: url
-                  value: https://github.com/konflux-ci/build-definitions.git
-                - name: revision
-                  value: main
-                - name: pathInRepo
-                  value: stepactions/eaas-get-ephemeral-cluster-credentials/0.1/eaas-get-ephemeral-cluster-credentials.yaml
-            params:
-              - name: eaasSpaceSecretRef
-                value: $(tasks.eaas-provision-space.results.secretRef)
-              - name: clusterName
-                value: "$(tasks.provision-managed.results.clusterName)"
-              - name: credentials
-                value: credentials
-
           - name: dump-credentials
             env:
               - name: DEBUG_DUMP_CREDENTIALS
                 value: "$(params.DEBUG_DUMP_CREDENTIALS)"
-              - name: HUB_API_SERVER_URL
-                value: "$(steps.get-hub-kubeconfig.results.apiServerURL)"
-              - name: HUB_CONSOLE_URL
-                value: "$(steps.get-hub-kubeconfig.results.consoleURL)"
-              - name: HUB_USERNAME
-                value: "$(steps.get-hub-kubeconfig.results.username)"
-              - name: HUB_PASSWORD_PATH
-                value: "$(steps.get-hub-kubeconfig.results.passwordPath)"
-              - name: HUB_KUBECONFIG_PATH
-                value: "$(steps.get-hub-kubeconfig.results.kubeconfig)"
-              - name: MANAGED_API_SERVER_URL
-                value: "$(steps.get-managed-kubeconfig.results.apiServerURL)"
-              - name: MANAGED_CONSOLE_URL
-                value: "$(steps.get-managed-kubeconfig.results.consoleURL)"
-              - name: MANAGED_USERNAME
-                value: "$(steps.get-managed-kubeconfig.results.username)"
-              - name: MANAGED_PASSWORD_PATH
-                value: "$(steps.get-managed-kubeconfig.results.passwordPath)"
-              - name: MANAGED_KUBECONFIG_PATH
-                value: "$(steps.get-managed-kubeconfig.results.kubeconfig)"
             volumeMounts:
-              - name: credentials
-                mountPath: /credentials
+              - name: hub-credentials
+                mountPath: /var/run/secrets/hub-cluster
+                readOnly: true
+              - name: managed-credentials
+                mountPath: /var/run/secrets/managed-cluster
+                readOnly: true
             image: registry.redhat.io/openshift4/ose-cli:latest
             script: |
               #!/usr/bin/env bash
@@ -403,33 +274,38 @@ spec:
               echo "# Ephemeral clusters are destroyed when this run ends.     #"
               echo "############################################################"
 
-              echo "=== HUB CLUSTER ==="
-              echo "API Server:  ${HUB_API_SERVER_URL}"
-              echo "Console:     ${HUB_CONSOLE_URL}"
-              echo "Username:    ${HUB_USERNAME}"
-              echo "--- HUB password ---"
-              cat "/credentials/${HUB_PASSWORD_PATH}"; echo
-              echo "--- HUB kubeconfig (base64) ---"
-              base64 -w0 "/credentials/${HUB_KUBECONFIG_PATH}"; echo
+              for CLUSTER_LABEL in HUB MANAGED; do
+                if [[ "${CLUSTER_LABEL}" == "HUB" ]]; then
+                  CRED_PATH="/var/run/secrets/hub-cluster"
+                else
+                  CRED_PATH="/var/run/secrets/managed-cluster"
+                fi
 
-              echo "=== MANAGED CLUSTER ==="
-              echo "API Server:  ${MANAGED_API_SERVER_URL}"
-              echo "Console:     ${MANAGED_CONSOLE_URL}"
-              echo "Username:    ${MANAGED_USERNAME}"
-              echo "--- MANAGED password ---"
-              cat "/credentials/${MANAGED_PASSWORD_PATH}"; echo
-              echo "--- MANAGED kubeconfig (base64) ---"
-              base64 -w0 "/credentials/${MANAGED_KUBECONFIG_PATH}"; echo
+                API_SERVER=$(KUBECONFIG="${CRED_PATH}/kubeconfig" oc config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || echo "unknown")
+                PASSWORD=$(cat "${CRED_PATH}/kubeAdminPassword" 2>/dev/null || echo "unknown")
+
+                echo "=== ${CLUSTER_LABEL} CLUSTER ==="
+                echo "API Server:  ${API_SERVER}"
+                echo "Username:    kubeadmin"
+                echo "--- ${CLUSTER_LABEL} password ---"
+                echo "${PASSWORD}"
+                echo "--- ${CLUSTER_LABEL} kubeconfig (base64) ---"
+                base64 -w0 "${CRED_PATH}/kubeconfig"; echo
+              done
 
           - name: import-cluster
             env:
               - name: KUBECONFIG
-                value: "/credentials/$(steps.get-hub-kubeconfig.results.kubeconfig)"
+                value: /var/run/secrets/hub-cluster/kubeconfig
               - name: MANAGED_KUBECONFIG
-                value: "/credentials/$(steps.get-managed-kubeconfig.results.kubeconfig)"
+                value: /var/run/secrets/managed-cluster/kubeconfig
             volumeMounts:
-              - name: credentials
-                mountPath: /credentials
+              - name: hub-credentials
+                mountPath: /var/run/secrets/hub-cluster
+                readOnly: true
+              - name: managed-credentials
+                mountPath: /var/run/secrets/managed-cluster
+                readOnly: true
             image: registry.redhat.io/openshift4/ose-cli:latest
             script: |
               #!/usr/bin/env bash
@@ -499,40 +375,28 @@ spec:
       params:
         - name: SNAPSHOT
           value: $(params.SNAPSHOT)
+        - name: hubClusterCredentialsSecretRef
+          value: $(tasks.provision-hub.results.secretRef)
       taskSpec:
         params:
           - name: SNAPSHOT
+          - name: hubClusterCredentialsSecretRef
+            type: string
         volumes:
-          - name: credentials
-            emptyDir: {}
+          - name: hub-credentials
+            secret:
+              secretName: $(params.hubClusterCredentialsSecretRef)
         steps:
-          - name: get-hub-kubeconfig
-            ref:
-              resolver: git
-              params:
-                - name: url
-                  value: https://github.com/konflux-ci/build-definitions.git
-                - name: revision
-                  value: main
-                - name: pathInRepo
-                  value: stepactions/eaas-get-ephemeral-cluster-credentials/0.1/eaas-get-ephemeral-cluster-credentials.yaml
-            params:
-              - name: eaasSpaceSecretRef
-                value: $(tasks.eaas-provision-space.results.secretRef)
-              - name: clusterName
-                value: "$(tasks.provision-hub.results.clusterName)"
-              - name: credentials
-                value: credentials
-
           - name: deploy-iop
             env:
               - name: SNAPSHOT
                 value: $(params.SNAPSHOT)
               - name: KUBECONFIG
-                value: "/credentials/$(steps.get-hub-kubeconfig.results.kubeconfig)"
+                value: /var/run/secrets/hub-cluster/kubeconfig
             volumeMounts:
-              - name: credentials
-                mountPath: /credentials
+              - name: hub-credentials
+                mountPath: /var/run/secrets/hub-cluster
+                readOnly: true
             image: registry.redhat.io/openshift4/ose-cli:latest
             script: |
               #!/usr/bin/env bash
@@ -618,14 +482,28 @@ spec:
           value: $(context.pipelineRun.name)
         - name: PIPELINE_RUN_NAMESPACE
           value: $(context.pipelineRun.namespace)
+        - name: hubClusterCredentialsSecretRef
+          value: $(tasks.provision-hub.results.secretRef)
+        - name: managedClusterCredentialsSecretRef
+          value: $(tasks.provision-managed.results.secretRef)
       taskSpec:
         params:
           - name: SNAPSHOT
           - name: PIPELINE_RUN_NAME
           - name: PIPELINE_RUN_NAMESPACE
+          - name: hubClusterCredentialsSecretRef
+            type: string
+          - name: managedClusterCredentialsSecretRef
+            type: string
         volumes:
-          - name: credentials
+          - name: shared-data
             emptyDir: {}
+          - name: hub-credentials
+            secret:
+              secretName: $(params.hubClusterCredentialsSecretRef)
+          - name: managed-credentials
+            secret:
+              secretName: $(params.managedClusterCredentialsSecretRef)
         steps:
           - name: read-test-filter
             env:
@@ -634,8 +512,8 @@ spec:
               - name: PIPELINE_RUN_NAMESPACE
                 value: "$(params.PIPELINE_RUN_NAMESPACE)"
             volumeMounts:
-              - name: credentials
-                mountPath: /credentials
+              - name: shared-data
+                mountPath: /shared
             image: registry.redhat.io/openshift4/ose-cli:latest
             script: |
               #!/usr/bin/env bash
@@ -643,64 +521,34 @@ spec:
               FILTER=$(oc get pipelinerun "${PIPELINE_RUN_NAME}" \
                 -n "${PIPELINE_RUN_NAMESPACE}" \
                 -o jsonpath='{.metadata.labels.debug\.iop/test-filter}' 2>/dev/null || true)
-              echo -n "${FILTER}" > /credentials/test-filter
+              echo -n "${FILTER}" > /shared/test-filter
               if [[ -n "${FILTER}" ]]; then
                 echo "Test filter from PipelineRun label: ${FILTER}"
               else
                 echo "No test filter set — running all tests"
               fi
 
-          - name: get-hub-kubeconfig
-            ref:
-              resolver: git
-              params:
-                - name: url
-                  value: https://github.com/konflux-ci/build-definitions.git
-                - name: revision
-                  value: main
-                - name: pathInRepo
-                  value: stepactions/eaas-get-ephemeral-cluster-credentials/0.1/eaas-get-ephemeral-cluster-credentials.yaml
-            params:
-              - name: eaasSpaceSecretRef
-                value: $(tasks.eaas-provision-space.results.secretRef)
-              - name: clusterName
-                value: "$(tasks.provision-hub.results.clusterName)"
-              - name: credentials
-                value: credentials
-
-          - name: get-managed-kubeconfig
-            ref:
-              resolver: git
-              params:
-                - name: url
-                  value: https://github.com/konflux-ci/build-definitions.git
-                - name: revision
-                  value: main
-                - name: pathInRepo
-                  value: stepactions/eaas-get-ephemeral-cluster-credentials/0.1/eaas-get-ephemeral-cluster-credentials.yaml
-            params:
-              - name: eaasSpaceSecretRef
-                value: $(tasks.eaas-provision-space.results.secretRef)
-              - name: clusterName
-                value: "$(tasks.provision-managed.results.clusterName)"
-              - name: credentials
-                value: credentials
-
           - name: run-tests
             env:
               - name: KUBECONFIG
-                value: "/credentials/$(steps.get-hub-kubeconfig.results.kubeconfig)"
+                value: /var/run/secrets/hub-cluster/kubeconfig
               - name: MANAGED_KUBECONFIG
-                value: "/credentials/$(steps.get-managed-kubeconfig.results.kubeconfig)"
+                value: /var/run/secrets/managed-cluster/kubeconfig
             volumeMounts:
-              - name: credentials
-                mountPath: /credentials
+              - name: shared-data
+                mountPath: /shared
+              - name: hub-credentials
+                mountPath: /var/run/secrets/hub-cluster
+                readOnly: true
+              - name: managed-credentials
+                mountPath: /var/run/secrets/managed-cluster
+                readOnly: true
             image: registry.redhat.io/openshift4/ose-cli:latest
             script: |
               #!/usr/bin/env bash
               set -euo pipefail
 
-              TEST_FILTER=$(cat /credentials/test-filter 2>/dev/null || true)
+              TEST_FILTER=$(cat /shared/test-filter 2>/dev/null || true)
               if [[ -n "${TEST_FILTER}" ]]; then
                 echo "=== IOP E2E Tests (filter: ${TEST_FILTER}) ==="
               else
@@ -773,7 +621,7 @@ spec:
   # ── Hold clusters on failure (opt-in via PipelineRun label) ──────────
   # When any task fails, checks the PipelineRun for a
   # "debug.iop/hold-on-failure=true" label. If set, prints cluster
-  # credentials and sleeps forever. Konflux kills the task when the
+  # credentials and sleeps forever. Konfux kills the task when the
   # ITS finally_timeout is reached. Cancel the PipelineRun manually
   # when done debugging.
   #
@@ -796,13 +644,29 @@ spec:
           value: $(context.pipelineRun.name)
         - name: PIPELINE_RUN_NAMESPACE
           value: $(context.pipelineRun.namespace)
+        - name: hubClusterCredentialsSecretRef
+          value: $(tasks.provision-hub.results.secretRef)
+        - name: managedClusterCredentialsSecretRef
+          value: $(tasks.provision-managed.results.secretRef)
       taskSpec:
         params:
           - name: PIPELINE_RUN_NAME
           - name: PIPELINE_RUN_NAMESPACE
+          - name: hubClusterCredentialsSecretRef
+            type: string
+          - name: managedClusterCredentialsSecretRef
+            type: string
         volumes:
-          - name: credentials
+          - name: shared-data
             emptyDir: {}
+          - name: hub-credentials
+            secret:
+              secretName: $(params.hubClusterCredentialsSecretRef)
+              optional: true
+          - name: managed-credentials
+            secret:
+              secretName: $(params.managedClusterCredentialsSecretRef)
+              optional: true
         steps:
           - name: check-hold-label
             env:
@@ -811,8 +675,8 @@ spec:
               - name: PIPELINE_RUN_NAMESPACE
                 value: "$(params.PIPELINE_RUN_NAMESPACE)"
             volumeMounts:
-              - name: credentials
-                mountPath: /credentials
+              - name: shared-data
+                mountPath: /shared
             image: registry.redhat.io/openshift4/ose-cli:latest
             script: |
               #!/usr/bin/env bash
@@ -820,7 +684,7 @@ spec:
               HOLD=$(oc get pipelinerun "${PIPELINE_RUN_NAME}" \
                 -n "${PIPELINE_RUN_NAMESPACE}" \
                 -o jsonpath='{.metadata.labels.debug\.iop/hold-on-failure}' 2>/dev/null || true)
-              echo -n "${HOLD}" > /credentials/hold-on-failure
+              echo -n "${HOLD}" > /shared/hold-on-failure
               if [[ "${HOLD}" != "true" ]]; then
                 echo "Label debug.iop/hold-on-failure is not set — skipping credential dump."
                 echo "To hold clusters on failure, label the PipelineRun before it fails:"
@@ -829,73 +693,22 @@ spec:
               fi
               echo "debug.iop/hold-on-failure=true — will dump credentials and hold."
 
-          - name: get-hub-kubeconfig
-            ref:
-              resolver: git
-              params:
-                - name: url
-                  value: https://github.com/konflux-ci/build-definitions.git
-                - name: revision
-                  value: main
-                - name: pathInRepo
-                  value: stepactions/eaas-get-ephemeral-cluster-credentials/0.1/eaas-get-ephemeral-cluster-credentials.yaml
-            params:
-              - name: eaasSpaceSecretRef
-                value: $(tasks.eaas-provision-space.results.secretRef)
-              - name: clusterName
-                value: "$(tasks.provision-hub.results.clusterName)"
-              - name: credentials
-                value: credentials
-
-          - name: get-managed-kubeconfig
-            ref:
-              resolver: git
-              params:
-                - name: url
-                  value: https://github.com/konflux-ci/build-definitions.git
-                - name: revision
-                  value: main
-                - name: pathInRepo
-                  value: stepactions/eaas-get-ephemeral-cluster-credentials/0.1/eaas-get-ephemeral-cluster-credentials.yaml
-            params:
-              - name: eaasSpaceSecretRef
-                value: $(tasks.eaas-provision-space.results.secretRef)
-              - name: clusterName
-                value: "$(tasks.provision-managed.results.clusterName)"
-              - name: credentials
-                value: credentials
-
           - name: print-credentials-and-wait
-            env:
-              - name: HUB_API_SERVER_URL
-                value: "$(steps.get-hub-kubeconfig.results.apiServerURL)"
-              - name: HUB_CONSOLE_URL
-                value: "$(steps.get-hub-kubeconfig.results.consoleURL)"
-              - name: HUB_USERNAME
-                value: "$(steps.get-hub-kubeconfig.results.username)"
-              - name: HUB_PASSWORD_PATH
-                value: "$(steps.get-hub-kubeconfig.results.passwordPath)"
-              - name: HUB_KUBECONFIG_PATH
-                value: "$(steps.get-hub-kubeconfig.results.kubeconfig)"
-              - name: MANAGED_API_SERVER_URL
-                value: "$(steps.get-managed-kubeconfig.results.apiServerURL)"
-              - name: MANAGED_CONSOLE_URL
-                value: "$(steps.get-managed-kubeconfig.results.consoleURL)"
-              - name: MANAGED_USERNAME
-                value: "$(steps.get-managed-kubeconfig.results.username)"
-              - name: MANAGED_PASSWORD_PATH
-                value: "$(steps.get-managed-kubeconfig.results.passwordPath)"
-              - name: MANAGED_KUBECONFIG_PATH
-                value: "$(steps.get-managed-kubeconfig.results.kubeconfig)"
             volumeMounts:
-              - name: credentials
-                mountPath: /credentials
+              - name: shared-data
+                mountPath: /shared
+              - name: hub-credentials
+                mountPath: /var/run/secrets/hub-cluster
+                readOnly: true
+              - name: managed-credentials
+                mountPath: /var/run/secrets/managed-cluster
+                readOnly: true
             image: registry.redhat.io/openshift4/ose-cli:latest
             script: |
               #!/usr/bin/env bash
               set -euo pipefail
 
-              HOLD=$(cat /credentials/hold-on-failure 2>/dev/null || true)
+              HOLD=$(cat /shared/hold-on-failure 2>/dev/null || true)
               if [[ "${HOLD}" != "true" ]]; then
                 echo "Hold not requested — exiting."
                 exit 0
@@ -904,34 +717,36 @@ spec:
               echo "############################################################"
               echo "# PIPELINE FAILED — cluster credentials for debugging      #"
               echo "# Cancel this PipelineRun when you are done.               #"
-              echo "# Clusters auto-destroy 2h after creation regardless.      #"
               echo "############################################################"
 
-              echo ""
-              echo "=== HUB CLUSTER ==="
-              echo "API Server:  ${HUB_API_SERVER_URL}"
-              echo "Console:     ${HUB_CONSOLE_URL}"
-              echo "Username:    ${HUB_USERNAME}"
-              echo "Password:    $(cat "/credentials/${HUB_PASSWORD_PATH}")"
-              echo ""
-              echo "Login command:"
-              echo "  oc login ${HUB_API_SERVER_URL} -u ${HUB_USERNAME} -p $(cat "/credentials/${HUB_PASSWORD_PATH}") --insecure-skip-tls-verify"
-              echo ""
-              echo "Kubeconfig (base64 — decode and save to a file):"
-              base64 -w0 "/credentials/${HUB_KUBECONFIG_PATH}"; echo
+              for CLUSTER_LABEL in HUB MANAGED; do
+                if [[ "${CLUSTER_LABEL}" == "HUB" ]]; then
+                  CRED_PATH="/var/run/secrets/hub-cluster"
+                else
+                  CRED_PATH="/var/run/secrets/managed-cluster"
+                fi
 
-              echo ""
-              echo "=== MANAGED CLUSTER ==="
-              echo "API Server:  ${MANAGED_API_SERVER_URL}"
-              echo "Console:     ${MANAGED_CONSOLE_URL}"
-              echo "Username:    ${MANAGED_USERNAME}"
-              echo "Password:    $(cat "/credentials/${MANAGED_PASSWORD_PATH}")"
-              echo ""
-              echo "Login command:"
-              echo "  oc login ${MANAGED_API_SERVER_URL} -u ${MANAGED_USERNAME} -p $(cat "/credentials/${MANAGED_PASSWORD_PATH}") --insecure-skip-tls-verify"
-              echo ""
-              echo "Kubeconfig (base64 — decode and save to a file):"
-              base64 -w0 "/credentials/${MANAGED_KUBECONFIG_PATH}"; echo
+                if [[ ! -f "${CRED_PATH}/kubeconfig" ]]; then
+                  echo "=== ${CLUSTER_LABEL} CLUSTER ==="
+                  echo "  (credentials not available — provisioning may have failed)"
+                  continue
+                fi
+
+                API_SERVER=$(KUBECONFIG="${CRED_PATH}/kubeconfig" oc config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || echo "unknown")
+                PASSWORD=$(cat "${CRED_PATH}/kubeAdminPassword" 2>/dev/null || echo "unknown")
+
+                echo ""
+                echo "=== ${CLUSTER_LABEL} CLUSTER ==="
+                echo "API Server:  ${API_SERVER}"
+                echo "Username:    kubeadmin"
+                echo "Password:    ${PASSWORD}"
+                echo ""
+                echo "Login command:"
+                echo "  oc login ${API_SERVER} -u kubeadmin -p ${PASSWORD} --insecure-skip-tls-verify"
+                echo ""
+                echo "Kubeconfig (base64 — decode and save to a file):"
+                base64 -w0 "${CRED_PATH}/kubeconfig"; echo
+              done
 
               echo ""
               echo "############################################################"
