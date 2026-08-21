@@ -191,7 +191,7 @@ def run_continuous(args, make_archive_fn):
     def worker(worker_id):
         tmpdir = tempfile.mkdtemp(prefix=f"send_archives_w{worker_id}_")
         try:
-            while (time.time() - start) < duration_sec:
+            while (time.time() - start) < duration_sec and (args.archives_count == 0 or counters["sent"] < args.archives_count):
                 cluster_id = str(uuid.uuid4())
                 is_bad = args.bad_ratio > 0 and random.random() < args.bad_ratio
                 path = None
@@ -271,7 +271,7 @@ def run_burst(args, make_archive_fn):
         def burst_worker(worker_id):
             tmpdir = tempfile.mkdtemp(prefix=f"send_archives_w{worker_id}_")
             try:
-                while (time.time() - burst_start) < burst_sec:
+                while (time.time() - burst_start) < burst_sec and (args.archives_count == 0 or (total_sent + counters["sent"]) < args.archives_count):
                     cluster_id = str(uuid.uuid4())
                     is_bad = args.bad_ratio > 0 and random.random() < args.bad_ratio
                     path = None
@@ -322,6 +322,9 @@ def run_burst(args, make_archive_fn):
         total_bad += counters["bad"]
         print(f"  Cycle {cycle+1} done: {counters['sent']} archives ({counters['bad']} bad)")
 
+        if args.archives_count and total_sent >= args.archives_count:
+            break
+
         if cycle < num_cycles - 1:
             print(f"  BREAK — {break_sec}s (watch for memory release)")
             time.sleep(break_sec)
@@ -341,6 +344,10 @@ def main():
     parser.add_argument(
         "--duration", type=int, default=60,
         help="Duration in minutes (default: 60)",
+    )
+    parser.add_argument(
+        "--archives-count", type=int, default=0,
+        help="Maximum total archives to send (0 = unlimited, stop only on --duration).",
     )
     parser.add_argument(
         "--delay", type=float, default=0,

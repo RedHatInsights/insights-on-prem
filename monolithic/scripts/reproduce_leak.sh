@@ -24,9 +24,10 @@ Positional arguments:
   BAD_RATIO       Fraction of bad archives 0.0-1.0 (default: 0.0)
 
 Options:
-  --no-molodec    Use self-contained archives instead of molodec
-  --parallel N    Number of parallel upload workers (default: 3)
-  --delay N       Seconds between uploads per worker (default: 0)
+  --no-molodec         Use self-contained archives instead of molodec
+  --parallel N         Number of parallel upload workers (default: 3)
+  --archives-count N   Max archives to send total (default: 0 = unlimited)
+  --delay N            Seconds between uploads per worker (default: 0)
   --burst         Burst mode: 10 min send + 1 min break cycles
   --cooldown N    Minutes of idle monitoring after load stops (default: 5)
   --max-exceptions-archive  Use max_exceptions_archive.tar for uploads
@@ -66,6 +67,7 @@ COMPOSE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Parse args: extract flags and key=value options, rest is positional
 NO_MOLODEC=""
 PARALLEL=""
+ARCHIVES_COUNT=""
 DELAY=""
 BURST=""
 COOLDOWN_MIN="5"
@@ -76,11 +78,12 @@ MAX_EXCEPTIONS_ARCHIVE=""
 POSITIONAL=()
 while [ $# -gt 0 ]; do
     case "$1" in
-        --no-molodec) NO_MOLODEC="--no-molodec" ;;
-        --burst)      BURST="--burst" ;;
-        --cooldown)   COOLDOWN_MIN="$2"; shift ;;
-        --parallel)   PARALLEL="$2"; shift ;;
-        --delay)      DELAY="$2"; shift ;;
+        --no-molodec)     NO_MOLODEC="--no-molodec" ;;
+        --burst)          BURST="--burst" ;;
+        --cooldown)       COOLDOWN_MIN="$2"; shift ;;
+        --parallel)       PARALLEL="$2"; shift ;;
+        --archives-count) ARCHIVES_COUNT="$2"; shift ;;
+        --delay)          DELAY="$2"; shift ;;
         --memray)     USE_MEMRAY=1 ;;
         --keep)       KEEP_CONTAINERS=1 ;;
         --max-exceptions-archive) MAX_EXCEPTIONS_ARCHIVE="$SCRIPT_DIR/max_exceptions_archive.tar" ;;
@@ -426,8 +429,9 @@ SEND_ARGS=(
     --duration "$DURATION_MIN"
     --bad-ratio "$BAD_RATIO"
 )
-[ -n "$PARALLEL" ]   && SEND_ARGS+=(--parallel "$PARALLEL")
-[ -n "$DELAY" ]      && SEND_ARGS+=(--delay "$DELAY")
+[ -n "$PARALLEL" ]       && SEND_ARGS+=(--parallel "$PARALLEL")
+[ -n "$ARCHIVES_COUNT" ] && [ "$ARCHIVES_COUNT" -ne 0 ] && SEND_ARGS+=(--archives-count "$ARCHIVES_COUNT")
+[ -n "$DELAY" ]          && SEND_ARGS+=(--delay "$DELAY")
 [ -n "$BURST" ]      && SEND_ARGS+=(--burst)
 [ -n "$NO_MOLODEC" ]            && SEND_ARGS+=(--no-molodec)
 [ -n "$MAX_EXCEPTIONS_ARCHIVE" ] && SEND_ARGS+=(--max-exceptions-archive "$MAX_EXCEPTIONS_ARCHIVE")
