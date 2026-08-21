@@ -278,7 +278,7 @@ if [ -n "$USE_MEMRAY" ]; then
     echo ""
     echo "=== Setting up memray profiling ==="
     echo "  Installing memray in container..."
-    if ! podman exec --user root insights-app /opt/venv/bin/pip install memray; then
+    if ! podman exec --user root insights-app /usr/local/bin/pip3 install memray; then
         echo "ERROR: failed to install memray in container"
         exit 1
     fi
@@ -316,8 +316,8 @@ if [ -n "$USE_MEMRAY" ]; then
         "${COMPOSE_VOLUMES[@]}" \
         --memory 4g \
         insights-app-memray:latest \
-        /opt/venv/bin/python -m memray run --output /tmp/memray-profile.bin \
-        /opt/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+        python -m memray run --output /tmp/memray-profile.bin \
+        /usr/local/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
 
     echo "  Waiting for app to restart..."
     WAITED=0

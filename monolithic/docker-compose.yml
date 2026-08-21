@@ -2,6 +2,7 @@ version: '3.8'
 
 services:
   postgres:
+    platform: linux/amd64
     image: postgres:15-alpine
     container_name: insights-postgres
     environment:
@@ -21,6 +22,7 @@ services:
       - insights-network
 
   app:
+    platform: linux/amd64
     #image: localhost/insights-on-prem-monolithic:latest
     #image: localhost/monolithic_app:latest_more_ins_fixes
     build:
@@ -47,8 +49,8 @@ services:
       - ./config.yml:/app/config.yml
       - temp_uploads:/tmp/insights-uploads
       # Patched upstream libraries for memory leak testing
-      - /Users/mzibrick/Projects/RH-ccx/insights-core/insights:/opt/venv/lib64/python3.12/site-packages/insights
-      - /Users/mzibrick/Projects/RH-ccx/ccx-ocp-core/ccx_ocp_core:/opt/venv/lib64/python3.12/site-packages/ccx_ocp_core
+      - /Users/mzibrick/Projects/RH-ccx/insights-core/insights:/usr/local/lib/python3.14/site-packages/insights
+      - /Users/mzibrick/Projects/RH-ccx/ccx-ocp-core/ccx_ocp_core:/usr/local/lib/python3.14/site-packages/ccx_ocp_core
     depends_on:
       postgres:
         condition: service_healthy
