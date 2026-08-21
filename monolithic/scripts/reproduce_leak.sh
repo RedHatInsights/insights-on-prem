@@ -27,6 +27,7 @@ Options:
   --no-molodec         Use self-contained archives instead of molodec
   --parallel N         Number of parallel upload workers (default: 3)
   --archives-count N   Max archives to send total (default: 0 = unlimited)
+  --wait               Wait for app to finish processing all sent archives before exiting
   --delay N            Seconds between uploads per worker (default: 0)
   --burst         Burst mode: 10 min send + 1 min break cycles
   --cooldown N    Minutes of idle monitoring after load stops (default: 5)
@@ -68,6 +69,7 @@ COMPOSE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 NO_MOLODEC=""
 PARALLEL=""
 ARCHIVES_COUNT=""
+WAIT_FOR_PROCESSED=""
 DELAY=""
 BURST=""
 COOLDOWN_MIN="5"
@@ -83,6 +85,7 @@ while [ $# -gt 0 ]; do
         --cooldown)       COOLDOWN_MIN="$2"; shift ;;
         --parallel)       PARALLEL="$2"; shift ;;
         --archives-count) ARCHIVES_COUNT="$2"; shift ;;
+        --wait)           WAIT_FOR_PROCESSED=1 ;;
         --delay)          DELAY="$2"; shift ;;
         --memray)     USE_MEMRAY=1 ;;
         --keep)       KEEP_CONTAINERS=1 ;;
@@ -98,6 +101,7 @@ BAD_RATIO="${POSITIONAL[1]:-0.0}"
 OUTPUT_DIR="${SCRIPT_DIR}/monitoring_$(date +%Y%m%d_%H%M%S)"
 MONITOR_PID=""
 SEND_PID=""
+PROGRESS_PID=""
 
 cleanup() {
     echo ""
@@ -113,6 +117,11 @@ cleanup() {
         echo "Stopping monitor (PID $MONITOR_PID)..."
         kill "$MONITOR_PID" 2>/dev/null || true
         wait "$MONITOR_PID" 2>/dev/null || true
+    fi
+
+    if [ -n "$PROGRESS_PID" ] && kill -0 "$PROGRESS_PID" 2>/dev/null; then
+        kill "$PROGRESS_PID" 2>/dev/null || true
+        wait "$PROGRESS_PID" 2>/dev/null || true
     fi
 
     # Report for insights-app (monitoring started after warm-up)
@@ -394,6 +403,7 @@ fi
 # Capture baseline memory after warm-up
 BASELINE_MEM=$(podman stats --no-stream --format "{{.MemUsage}}" insights-app 2>/dev/null | awk '{print $1}' | sed 's/[A-Za-z]*//g')
 echo "  Baseline memory: ${BASELINE_MEM} MiB"
+BASELINE_PROCESSED=$(podman logs insights-app 2>&1 | grep -c "Starting archive processing" || echo 0)
 echo ""
 
 # --- Start monitoring (after warm-up, so baseline is clean) ---
@@ -441,6 +451,17 @@ SEND_ARGS=(
 SEND_PID=$!
 echo "  Load generator PID: $SEND_PID"
 
+(
+    while true; do
+        sleep 30
+        COUNT=$(podman logs insights-app 2>&1 | grep -c "Starting archive processing" 2>/dev/null || echo 0)
+        DELTA=$((COUNT - BASELINE_PROCESSED))
+        [ "$DELTA" -lt 0 ] && DELTA=0
+        echo "  [$(date +%H:%M:%S)] App processed: $DELTA archives"
+    done
+) &
+PROGRESS_PID=$!
+
 echo ""
 echo "=== Running ==="
 echo "  Monitor:  $MONITOR_PID"
@@ -453,14 +474,50 @@ echo ""
 wait "$SEND_PID" 2>/dev/null || true
 SEND_PID=""
 
-echo ""
-echo "=== Cool-down (${COOLDOWN_MIN} min, no archives sent — watching memory) ==="
+# Kill progress reporter and print final count
+kill "$PROGRESS_PID" 2>/dev/null || true
+wait "$PROGRESS_PID" 2>/dev/null || true
+PROGRESS_PID=""
+FINAL_COUNT=$(podman logs insights-app 2>&1 | grep -c "Starting archive processing" 2>/dev/null || echo 0)
+FINAL_COUNT=$((FINAL_COUNT - BASELINE_PROCESSED))
+[ "$FINAL_COUNT" -lt 0 ] && FINAL_COUNT=0
+echo "  Archives processed by app at load stop: $FINAL_COUNT"
 
-# Wait for monitor to finish (it runs for DURATION_MIN + COOLDOWN_MIN)
-if [ -n "$MONITOR_PID" ] && kill -0 "$MONITOR_PID" 2>/dev/null; then
-    wait "$MONITOR_PID" 2>/dev/null || true
+# If cooldown=0: wait for the app to drain all queued archives
+if [ -n "$WAIT_FOR_PROCESSED" ] || [ "$COOLDOWN_MIN" -eq 0 ]; then
+    echo ""
+    echo "=== Waiting for app to finish processing all archives (cooldown=0) ==="
+    LAST_COUNT=-1
+    STABLE_SECS=0
+    while true; do
+        sleep 5
+        COUNT=$(podman logs insights-app 2>&1 | grep -c "Starting archive processing" 2>/dev/null || echo 0)
+        DELTA=$((COUNT - BASELINE_PROCESSED))
+        [ "$DELTA" -lt 0 ] && DELTA=0
+        if [ "$DELTA" -eq "$LAST_COUNT" ]; then
+            STABLE_SECS=$((STABLE_SECS + 5))
+            echo "  App processed: $DELTA archives (stable for ${STABLE_SECS}s)"
+            if [ "$STABLE_SECS" -ge 30 ]; then
+                echo "  Processing complete."
+                break
+            fi
+        else
+            STABLE_SECS=0
+            LAST_COUNT="$DELTA"
+            echo "  App processed: $DELTA archives"
+        fi
+    done
 fi
-MONITOR_PID=""
+
+echo ""
+if [ "$COOLDOWN_MIN" -gt 0 ]; then
+    echo "=== Cool-down (${COOLDOWN_MIN} min, no archives sent — watching memory) ==="
+    # Wait for monitor to finish (it runs for DURATION_MIN + COOLDOWN_MIN)
+    if [ -n "$MONITOR_PID" ] && kill -0 "$MONITOR_PID" 2>/dev/null; then
+        wait "$MONITOR_PID" 2>/dev/null || true
+    fi
+    MONITOR_PID=""
+fi
 
 echo ""
 echo "Done."
