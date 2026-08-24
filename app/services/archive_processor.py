@@ -2,7 +2,7 @@
 
 import logging
 import os
-from queue import Queue
+from queue import Full, Queue
 from threading import Thread
 
 from sqlalchemy.orm import sessionmaker
@@ -12,25 +12,35 @@ from app.services.processor_service import ProcessorService
 logger = logging.getLogger(__name__)
 
 _STOP = None
+DEFAULT_QUEUE_SIZE = 10
 
 
 class ArchiveProcessor(Thread):
-    """Consume archive jobs from a multiprocessing Queue on a single thread."""
+    """Consume archive jobs from a bounded queue on a single thread."""
 
     def __init__(
         self,
         processor_service: ProcessorService,
         session_factory: sessionmaker,
+        queue_size: int = DEFAULT_QUEUE_SIZE,
         queue: Queue | None = None,
     ):
         super().__init__(name="archive-processor", daemon=True)
         self.processor_service = processor_service
         self.session_factory = session_factory
-        self.queue: Queue = queue if queue is not None else Queue()
+        if queue is not None:
+            self.queue = queue
+        else:
+            if queue_size < 1:
+                raise ValueError("queue_size must be at least 1")
+            self.queue: Queue = Queue(maxsize=queue_size)
         self._stop_requested = False
 
     def run(self) -> None:
-        logger.info("Archive processor thread started")
+        logger.info(
+            "Archive processor thread started (queue maxsize=%s)",
+            self.queue.maxsize,
+        )
         while True:
             job = self.queue.get()
             if job is _STOP:
@@ -80,10 +90,11 @@ class ArchiveProcessor(Thread):
 
         if not self._stop_requested:
             self._stop_requested = True
-            self.queue.put(_STOP)
+            try:
+                self.queue.put(_STOP, timeout=timeout)
+            except Full:
+                logger.warning(
+                    "Queue is full; stop sentinel was not enqueued before timeout"
+                )
         self.join(timeout)
-        stopped = not self.is_alive()
-        if stopped:
-            self.queue.close()
-            self.queue.join_thread()
-        return stopped
+        return not self.is_alive()

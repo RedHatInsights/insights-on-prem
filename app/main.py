@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from app.config_loader import load_config, load_insights_components
 from app.content_parser_yaml import YAMLContentParser
 from app.database import get_db, init_db
-from app.exceptions import ValidationError
+from app.exceptions import ProcessorBusyError, ValidationError
 from app.models import Report, RequestReport, RuleHit
 from app.schemas import (
     BatchUpgradeRisksPredictionRequest,
@@ -72,7 +72,11 @@ async def lifespan(app: FastAPI):
     load_insights_components(config)
 
     processor_service = ProcessorService(config)
-    archive_processor = ArchiveProcessor(processor_service, session_factory)
+    archive_processor = ArchiveProcessor(
+        processor_service,
+        session_factory,
+        queue_size=config.archive_queue_size,
+    )
     archive_processor.start()
     app.state.upload_service = UploadService(config, archive_processor.queue)
     app.state.content_service = ContentService(YAMLContentParser())
@@ -160,6 +164,10 @@ async def health_check():
         400: {"model": ErrorResponse, "description": "Bad Request"},
         401: {"model": ErrorResponse, "description": "Unauthorized"},
         500: {"model": ErrorResponse, "description": "Internal Server Error"},
+        503: {
+            "model": ErrorResponse,
+            "description": "Archive processor is busy; retry later",
+        },
     },
 )
 async def upload_archive(
@@ -187,6 +195,16 @@ async def upload_archive(
         raise HTTPException(
             status_code=400,
             detail=str(e),
+        ) from e
+
+    except ProcessorBusyError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=str(e),
+            headers={
+                "Retry-After": "60",
+                "x-rh-insights-request-id": request_id,
+            },
         ) from e
 
     except Exception as e:
@@ -417,12 +435,14 @@ async def http_exception_handler(request, exc: HTTPException):
     :param exc: HTTPException instance
     :return: JSONResponse with error details
     """
+    request_id = request.headers.get("x-rh-insights-request-id") or exc.headers.get("x-rh-insights-request-id")
     return JSONResponse(
         status_code=exc.status_code,
         content=ErrorResponse(
             error=exc.detail,
-            request_id=request.headers.get("x-rh-insights-request-id"),
-        ).dict(),
+            request_id=request_id,
+        ).model_dump(),
+        headers=exc.headers,
     )
 
 

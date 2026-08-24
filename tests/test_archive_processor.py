@@ -2,13 +2,15 @@
 
 import os
 import tempfile
-from multiprocessing import Queue
+from queue import Full
 from unittest.mock import Mock
+
+import pytest
 
 from app.services.archive_processor import ArchiveProcessor
 
 
-def _make_processor(process_archive=None):
+def _make_processor(process_archive=None, queue=None, queue_size=10):
     processor_service = Mock()
     processor_service.process_archive.side_effect = process_archive
     if process_archive is None:
@@ -17,9 +19,13 @@ def _make_processor(process_archive=None):
     session = Mock()
     session_factory = Mock(return_value=session)
 
-    queue = Queue()
-    processor = ArchiveProcessor(processor_service, session_factory, queue=queue)
-    return processor, processor_service, session_factory, queue
+    processor = ArchiveProcessor(
+        processor_service,
+        session_factory,
+        queue_size=queue_size,
+        queue=queue,
+    )
+    return processor, processor_service, session_factory, processor.queue
 
 
 def _temp_archive():
@@ -50,6 +56,23 @@ def test_process_job_cleanup_on_error():
 
     session_factory.return_value.close.assert_called_once()
     assert not os.path.exists(temp_path)
+
+
+def test_processor_creates_bounded_queue():
+    """Test the processor creates a queue with the requested max size."""
+    processor, _service, _factory, queue = _make_processor(queue_size=2)
+
+    assert queue.maxsize == 2
+    queue.put_nowait(("a", "req-1"))
+    queue.put_nowait(("b", "req-2"))
+    with pytest.raises(Full):
+        queue.put_nowait(("c", "req-3"))
+
+
+def test_processor_rejects_invalid_queue_size():
+    """Test queue_size must be at least 1."""
+    with pytest.raises(ValueError, match="queue_size"):
+        ArchiveProcessor(Mock(), Mock(), queue_size=0)
 
 
 def test_processor_consumes_queue_on_single_thread():

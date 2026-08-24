@@ -19,6 +19,12 @@ class ProcessingError(AppError):
     pass
 
 
+class ProcessorBusyError(AppError):
+    """Raised when the archive processor queue is full."""
+
+    pass
+
+
 class NotFoundError(AppError):
     """Raised when a resource is not found."""
 

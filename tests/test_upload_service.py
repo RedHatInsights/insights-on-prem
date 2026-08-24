@@ -2,12 +2,13 @@
 
 import os
 import tempfile
+from queue import Full
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 from app.config import AppConfig
-from app.exceptions import ValidationError
+from app.exceptions import ProcessorBusyError, ValidationError
 from app.schemas import UploadResponse
 from app.services.upload_service import UploadService
 
@@ -50,8 +51,8 @@ async def test_process_upload_success(upload_service, mock_archive_queue):
     assert result.request_id == "req-123"
     assert result.status == "accepted"
 
-    mock_archive_queue.put.assert_called_once()
-    temp_path, request_id = mock_archive_queue.put.call_args[0][0]
+    mock_archive_queue.put_nowait.assert_called_once()
+    temp_path, request_id = mock_archive_queue.put_nowait.call_args[0][0]
     assert request_id == "req-123"
     assert temp_path.endswith(".tar.gz")
     os.remove(temp_path)
@@ -67,8 +68,8 @@ async def test_process_upload_enqueues_archive(upload_service, mock_archive_queu
 
     await upload_service.process_upload(mock_file, "req-123")
 
-    mock_archive_queue.put.assert_called_once()
-    temp_path, request_id = mock_archive_queue.put.call_args[0][0]
+    mock_archive_queue.put_nowait.assert_called_once()
+    temp_path, request_id = mock_archive_queue.put_nowait.call_args[0][0]
     assert request_id == "req-123"
     os.remove(temp_path)
 
@@ -82,4 +83,22 @@ async def test_process_upload_validation_error(upload_service, mock_archive_queu
     with pytest.raises(ValidationError):
         await upload_service.process_upload(mock_file, "req-123")
 
-    mock_archive_queue.put.assert_not_called()
+    mock_archive_queue.put_nowait.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_process_upload_queue_full_raises_busy(tmp_path):
+    """Test that a full queue raises ProcessorBusyError and removes the temp file."""
+    mock_queue = Mock()
+    mock_queue.put_nowait.side_effect = Full
+    config = AppConfig(temp_upload_dir=str(tmp_path))
+    service = UploadService(config=config, archive_queue=mock_queue)
+
+    mock_file = Mock()
+    mock_file.filename = "test.tar.gz"
+    mock_file.read = AsyncMock(side_effect=[b"test archive", b""])
+
+    with pytest.raises(ProcessorBusyError, match="retry later"):
+        await service.process_upload(mock_file, "req-123")
+
+    assert list(tmp_path.iterdir()) == []

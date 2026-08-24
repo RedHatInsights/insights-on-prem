@@ -5,12 +5,12 @@ import logging
 import os
 import tempfile
 from datetime import datetime, timezone
-from multiprocessing.queues import Queue
+from queue import Full, Queue
 
 from fastapi import UploadFile
 
 from app.config import AppConfig
-from app.exceptions import ValidationError
+from app.exceptions import ProcessorBusyError, ValidationError
 from app.schemas import UploadResponse
 
 logger = logging.getLogger(__name__)
@@ -108,12 +108,19 @@ class UploadService:
         :param request_id: Request ID
         :return: UploadResponse with accepted status
         :raises ValidationError: On validation errors
+        :raises ProcessorBusyError: If the processor queue is full
         """
         logger.info(f"Upload request {request_id}")
 
         self._validate_file(file, request_id)
         temp_file_path, _ = await self._save_to_temp(file, request_id)
-        self.archive_queue.put((temp_file_path, request_id))
+        try:
+            self.archive_queue.put_nowait((temp_file_path, request_id))
+        except Full as e:
+            with contextlib.suppress(Exception):
+                os.remove(temp_file_path)
+            logger.warning(f"Request {request_id}: Archive processor queue is full")
+            raise ProcessorBusyError("Archive processor is busy, retry later") from e
 
         return UploadResponse(
             request_id=request_id,
