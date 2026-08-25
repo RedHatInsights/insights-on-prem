@@ -2,6 +2,7 @@
 
 import logging
 import os
+import time
 from queue import Full, Queue
 from threading import Thread
 
@@ -88,13 +89,21 @@ class ArchiveProcessor(Thread):
         if self.ident is None:
             return True
 
+        deadline = None if timeout is None else time.monotonic() + timeout
+
+        def remaining() -> float | None:
+            if deadline is None:
+                return None
+            return max(0.0, deadline - time.monotonic())
+
         if not self._stop_requested:
-            self._stop_requested = True
             try:
-                self.queue.put(_STOP, timeout=timeout)
+                self.queue.put(_STOP, timeout=remaining())
             except Full:
                 logger.warning(
                     "Queue is full; stop sentinel was not enqueued before timeout"
                 )
-        self.join(timeout)
+            else:
+                self._stop_requested = True
+        self.join(remaining())
         return not self.is_alive()

@@ -435,7 +435,9 @@ async def http_exception_handler(request, exc: HTTPException):
     :param exc: HTTPException instance
     :return: JSONResponse with error details
     """
-    request_id = request.headers.get("x-rh-insights-request-id") or exc.headers.get("x-rh-insights-request-id")
+    request_id = request.headers.get("x-rh-insights-request-id")
+    if not request_id and exc.headers:
+        request_id = exc.headers.get("x-rh-insights-request-id")
     return JSONResponse(
         status_code=exc.status_code,
         content=ErrorResponse(

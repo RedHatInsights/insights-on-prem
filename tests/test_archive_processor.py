@@ -3,7 +3,7 @@
 import os
 import tempfile
 from queue import Full
-from unittest.mock import Mock
+from unittest.mock import Mock, PropertyMock, patch
 
 import pytest
 
@@ -106,3 +106,23 @@ def test_stop_on_never_started_thread():
     """Test stop is a no-op if the thread was never started."""
     processor, _service, _factory, _queue = _make_processor()
     assert processor.stop(timeout=1)
+
+
+def test_stop_retries_sentinel_after_queue_full():
+    """Test stop retries enqueueing _STOP if a previous put timed out."""
+    queue = Mock()
+    queue.put.side_effect = [Full, None]
+    processor, _service, _factory, _queue = _make_processor(queue=queue)
+
+    with (
+        patch.object(ArchiveProcessor, "ident", PropertyMock(return_value=1)),
+        patch.object(processor, "join"),
+        patch.object(processor, "is_alive", return_value=False),
+    ):
+        processor.stop(timeout=0.5)
+        assert not processor._stop_requested
+        assert queue.put.call_count == 1
+
+        processor.stop(timeout=0.5)
+        assert processor._stop_requested
+        assert queue.put.call_count == 2
