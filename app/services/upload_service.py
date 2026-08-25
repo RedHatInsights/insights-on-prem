@@ -5,14 +5,14 @@ import logging
 import os
 import tempfile
 from datetime import datetime, timezone
+from queue import Full
 
-from fastapi import BackgroundTasks, UploadFile
-from sqlalchemy.orm import sessionmaker
+from fastapi import UploadFile
 
 from app.config import AppConfig
-from app.exceptions import ValidationError
+from app.exceptions import ProcessorBusyError, ValidationError
 from app.schemas import UploadResponse
-from app.services.processor_service import ProcessorService
+from app.services.archive_processor import ArchiveQueue
 
 logger = logging.getLogger(__name__)
 
@@ -20,17 +20,9 @@ logger = logging.getLogger(__name__)
 class UploadService:
     """Service for handling archive uploads and processing orchestration."""
 
-    def __init__(
-        self,
-        processor_service: ProcessorService,
-        config: AppConfig,
-        session_factory: sessionmaker,
-        task_tracker=None,
-    ):
-        self.processor_service = processor_service
+    def __init__(self, config: AppConfig, archive_queue: ArchiveQueue):
         self.config = config
-        self.session_factory = session_factory
-        self.task_tracker = task_tracker
+        self.archive_queue = archive_queue
 
     def _get_archive_suffix(self, file: UploadFile) -> str:
         suffix = ""
@@ -109,60 +101,27 @@ class UploadService:
 
         return temp_file_path, total_size
 
-    def _process_in_background(self, temp_file_path: str, request_id: str) -> None:
-        if self.task_tracker:
-            self.task_tracker.start()
-        try:
-            db = self.session_factory()
-            try:
-                cluster_id, rules_count = self.processor_service.process_archive(
-                    db, temp_file_path, request_id
-                )
-                logger.info(
-                    f"Request {request_id}: Successfully processed cluster {cluster_id} "
-                    f"with {rules_count} rules"
-                )
-            except Exception as e:
-                logger.error(
-                    f"Request {request_id}: Background processing failed: {e}",
-                    exc_info=True,
-                )
-            finally:
-                db.close()
-        finally:
-            if os.path.exists(temp_file_path):
-                try:
-                    os.remove(temp_file_path)
-                    logger.debug(f"Cleaned up temporary file: {temp_file_path}")
-                except Exception as e:
-                    logger.warning(f"Failed to clean up temporary file: {e}")
-            if self.task_tracker:
-                self.task_tracker.finish()
-
-    async def process_upload(
-        self, background_tasks: BackgroundTasks, file: UploadFile, request_id: str
-    ) -> UploadResponse:
+    async def process_upload(self, file: UploadFile, request_id: str) -> UploadResponse:
         """
-        Validate and save upload, then schedule processing as a background task.
+        Validate and save upload, then enqueue it for processing.
 
-        :param background_tasks: FastAPI BackgroundTasks
         :param file: Uploaded file
         :param request_id: Request ID
         :return: UploadResponse with accepted status
         :raises ValidationError: On validation errors
+        :raises ProcessorBusyError: If the processor queue is full
         """
         logger.info(f"Upload request {request_id}")
 
-        # Validate file
         self._validate_file(file, request_id)
-
-        # Save to temp location
-        temp_file_path, total_size = await self._save_to_temp(file, request_id)
-
-        # Schedule processing as background task
-        background_tasks.add_task(
-            self._process_in_background, temp_file_path, request_id
-        )
+        temp_file_path, _ = await self._save_to_temp(file, request_id)
+        try:
+            self.archive_queue.put_nowait((temp_file_path, request_id))
+        except Full as e:
+            with contextlib.suppress(Exception):
+                os.remove(temp_file_path)
+            logger.warning(f"Request {request_id}: Archive processor queue is full")
+            raise ProcessorBusyError("Archive processor is busy, retry later") from e
 
         return UploadResponse(
             request_id=request_id,

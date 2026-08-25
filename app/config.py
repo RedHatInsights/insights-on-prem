@@ -18,6 +18,7 @@ class AppConfig:
     postgres_user: str = "insights"
     postgres_password: str = "insights"
     max_file_size: int = 104857600
+    archive_queue_size: int = 10
     temp_upload_dir: str = "/tmp/insights-uploads"
     extract_timeout_seconds: int = 300
     format: str = "insights.formats._json.JsonFormat"
@@ -57,6 +58,7 @@ _ENV_OVERRIDES = {
     "POSTGRES_USER": ("postgres_user", str),
     "POSTGRES_PASSWORD": ("postgres_password", str),
     "MAX_FILE_SIZE": ("max_file_size", int),
+    "ARCHIVE_QUEUE_SIZE": ("archive_queue_size", int),
     "TEMP_UPLOAD_DIR": ("temp_upload_dir", str),
     "THANOS_URL": ("thanos_url", str),
     "THANOS_TOKEN_PATH": ("thanos_token_path", str),

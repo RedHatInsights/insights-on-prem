@@ -12,7 +12,6 @@ from datetime import datetime, timedelta, timezone
 
 import uvicorn
 from fastapi import (
-    BackgroundTasks,
     Depends,
     FastAPI,
     File,
@@ -26,7 +25,7 @@ from sqlalchemy.orm import Session
 from app.config_loader import load_config, load_insights_components
 from app.content_parser_yaml import YAMLContentParser
 from app.database import get_db, init_db
-from app.exceptions import ValidationError
+from app.exceptions import ProcessorBusyError, ValidationError
 from app.models import Report, RequestReport, RuleHit
 from app.schemas import (
     BatchUpgradeRisksPredictionRequest,
@@ -39,13 +38,13 @@ from app.schemas import (
     SimplifiedRuleHit,
     UploadResponse,
 )
+from app.services.archive_processor import ArchiveProcessor
 from app.services.content_service import ContentService
 from app.services.processor_service import ProcessorService
 from app.services.report_service import ReportService
 from app.services.thanos_service import ThanosService
 from app.services.upgrade_prediction_service import UpgradePredictionService
 from app.services.upload_service import UploadService
-from app.utils.task_tracker import BackgroundTaskTracker
 
 logger = logging.getLogger(__name__)
 
@@ -72,14 +71,14 @@ async def lifespan(app: FastAPI):
     # Initialize processor config and components
     load_insights_components(config)
 
-    task_tracker = BackgroundTaskTracker()
-    app.state.processor_service = ProcessorService(config)
-    app.state.upload_service = UploadService(
-        app.state.processor_service,
-        config,
+    processor_service = ProcessorService(config)
+    archive_processor = ArchiveProcessor(
+        processor_service,
         session_factory,
-        task_tracker=task_tracker,
+        queue_size=config.archive_queue_size,
     )
+    archive_processor.start()
+    app.state.upload_service = UploadService(config, archive_processor.queue)
     app.state.content_service = ContentService(YAMLContentParser())
     app.state.report_service = ReportService(app.state.content_service)
     app.state.thanos_service = ThanosService(config)
@@ -90,15 +89,12 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    logger.info("Shutting down: waiting for in-flight background tasks...")
-    drained = await asyncio.to_thread(task_tracker.wait_until_idle, 270)
+    logger.info("Shutting down: waiting for archive processor to drain...")
+    drained = await asyncio.to_thread(archive_processor.stop, 270)
     if drained:
-        logger.info("All background tasks finished")
+        logger.info("Archive processor stopped")
     else:
-        logger.warning(
-            "Shutdown timeout: %d background tasks still running",
-            task_tracker.active_count,
-        )
+        logger.warning("Shutdown timeout: archive processor still running")
 
     cleanup_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
@@ -168,19 +164,21 @@ async def health_check():
         400: {"model": ErrorResponse, "description": "Bad Request"},
         401: {"model": ErrorResponse, "description": "Unauthorized"},
         500: {"model": ErrorResponse, "description": "Internal Server Error"},
+        503: {
+            "model": ErrorResponse,
+            "description": "Archive processor is busy; retry later",
+        },
     },
 )
 async def upload_archive(
     request: Request,
     response: Response,
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),  # noqa: B008
 ):
     """
     Upload and process Red Hat Insights archive.
 
     :param file: Uploaded archive file (tar, tar.gz, or tgz format)
-    :param background_tasks: FastAPI background tasks
     :return: UploadResponse with accepted status
     :raises HTTPException: On validation errors
     """
@@ -189,9 +187,7 @@ async def upload_archive(
     request_id = str(uuid.uuid4())
 
     try:
-        upload_response = await upload_service.process_upload(
-            background_tasks, file, request_id
-        )
+        upload_response = await upload_service.process_upload(file, request_id)
         response.headers["x-rh-insights-request-id"] = request_id
         return upload_response
 
@@ -199,6 +195,16 @@ async def upload_archive(
         raise HTTPException(
             status_code=400,
             detail=str(e),
+        ) from e
+
+    except ProcessorBusyError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=str(e),
+            headers={
+                "Retry-After": "60",
+                "x-rh-insights-request-id": request_id,
+            },
         ) from e
 
     except Exception as e:
@@ -429,12 +435,16 @@ async def http_exception_handler(request, exc: HTTPException):
     :param exc: HTTPException instance
     :return: JSONResponse with error details
     """
+    request_id = request.headers.get("x-rh-insights-request-id")
+    if not request_id and exc.headers:
+        request_id = exc.headers.get("x-rh-insights-request-id")
     return JSONResponse(
         status_code=exc.status_code,
         content=ErrorResponse(
             error=exc.detail,
-            request_id=request.headers.get("x-rh-insights-request-id"),
-        ).dict(),
+            request_id=request_id,
+        ).model_dump(),
+        headers=exc.headers,
     )
 
 

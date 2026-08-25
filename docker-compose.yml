@@ -36,10 +36,10 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./app:/app/app
-      - ./migrations:/app/migrations
-      - ./tests:/app/tests
-      - ./config.yml:/app/config.yml
+      - ./app:/app/app:z
+      - ./migrations:/app/migrations:z
+      - ./tests:/app/tests:z
+      - ./config.yml:/app/config.yml:z
       - temp_uploads:/tmp/insights-uploads
     depends_on:
       postgres:
