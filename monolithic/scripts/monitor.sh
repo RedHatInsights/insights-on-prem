@@ -34,6 +34,9 @@ for container in "${CONTAINERS[@]}"; do
     echo "timestamp,elapsed_min,vm_size_kb,vm_rss_kb,vm_data_kb,vm_stk_kb" \
         > "$OUTPUT_DIR/${container}_process_memory.csv"
 
+    echo "timestamp,elapsed_min,fd_total,fd_sockets,fd_pipes,fd_tmp,fd_files" \
+        > "$OUTPUT_DIR/${container}_fd_count.csv"
+
     echo "timestamp,elapsed_min,disk_mb" \
         > "$OUTPUT_DIR/${container}_disk_usage.csv"
 done
@@ -101,7 +104,7 @@ while true; do
 
         # Find the process with the largest VmRSS (the actual worker, not
         # a uvicorn --reload master or a QEMU wrapper).
-        PROC_MEM=$(podman exec "$container" sh -c '
+        PROC_DATA=$(podman exec "$container" sh -c '
             TARGET_PID=1
             MAX_RSS=0
             for p in /proc/[0-9]*/status; do
@@ -112,15 +115,32 @@ while true; do
                     TARGET_PID=$pid
                 fi
             done
-            grep -E "VmSize|VmRSS|VmData|VmStk" "/proc/$TARGET_PID/status" 2>/dev/null \
-                | awk "{print \$2}" | tr "\n" ","
+            # Memory fields
+            mem=$(grep -E "VmSize|VmRSS|VmData|VmStk" "/proc/$TARGET_PID/status" 2>/dev/null \
+                | awk "{print \$2}" | tr "\n" ",")
+            # Open FD count + breakdown by type
+            fd_dir="/proc/$TARGET_PID/fd"
+            fd_total=$(ls "$fd_dir" 2>/dev/null | wc -l)
+            fd_sockets=0; fd_pipes=0; fd_files=0; fd_tmp=0
+            for fd in "$fd_dir"/*; do
+                target=$(readlink "$fd" 2>/dev/null) || continue
+                case "$target" in
+                    socket:*)  fd_sockets=$((fd_sockets+1)) ;;
+                    pipe:*)    fd_pipes=$((fd_pipes+1)) ;;
+                    /tmp/*)    fd_tmp=$((fd_tmp+1)) ;;
+                    /*)        fd_files=$((fd_files+1)) ;;
+                esac
+            done
+            printf "%s%d,%d,%d,%d,%d\n" "$mem" "$fd_total" "$fd_sockets" "$fd_pipes" "$fd_tmp" "$fd_files"
         ' 2>/dev/null) || true
 
-        if [ -n "$PROC_MEM" ]; then
-            # Strip trailing comma
-            PROC_MEM="${PROC_MEM%,}"
+        if [ -n "$PROC_DATA" ]; then
+            PROC_MEM=$(echo "$PROC_DATA" | cut -d',' -f1-4 | sed 's/,$//')
+            PROC_FD=$(echo  "$PROC_DATA" | cut -d',' -f5-)
             echo "${TIMESTAMP},${ELAPSED_MIN},${PROC_MEM}" \
                 >> "$OUTPUT_DIR/${container}_process_memory.csv"
+            echo "${TIMESTAMP},${ELAPSED_MIN},${PROC_FD}" \
+                >> "$OUTPUT_DIR/${container}_fd_count.csv"
         fi
 
         # Disk usage inside container
@@ -137,8 +157,9 @@ while true; do
         # Status line every minute (~6 iterations at 10s interval)
         if [ $((ITERATION % 3)) -eq 0 ]; then
             DISK_DISPLAY="${DISK_MB:-?}"
-            printf "  [%3d min] %-20s mem=%s MiB  cpu=%s%%  disk=%s MB\n" \
-                "$ELAPSED_MIN" "$container" "$MEM_USAGE" "$CPU_PERC" "$DISK_DISPLAY"
+            FD_DISPLAY=$(echo "${PROC_FD:-?}" | cut -d',' -f1)
+            printf "  [%3d min] %-20s mem=%s MiB  cpu=%s%%  disk=%s MB  fds=%s\n" \
+                "$ELAPSED_MIN" "$container" "$MEM_USAGE" "$CPU_PERC" "$DISK_DISPLAY" "$FD_DISPLAY"
         fi
     done
 
@@ -188,6 +209,24 @@ echo "Monitoring completed at $(date)"
             } END {
                 if(n>0) printf "  VmRSS:         start=%.0f KB  end=%.0f KB  delta=%+.0f KB (%+.1f MB)\n", first, last, last-first, (last-first)/1024
             }' "$PROC_CSV"
+        fi
+
+        # FD count
+        FD_CSV="$OUTPUT_DIR/${container}_fd_count.csv"
+        if [ -f "$FD_CSV" ] && [ "$(wc -l < "$FD_CSV")" -gt 1 ]; then
+            awk -F',' 'NR>1 && $3+0>0 {
+                n++;
+                if(n==1) { first=$3+0; first_sock=$4+0; first_tmp=$6+0 }
+                last=$3+0; last_sock=$4+0; last_tmp=$6+0
+                if($3+0>max) max=$3+0
+            } END {
+                if(n>0) {
+                    printf "  FDs:           start=%d  end=%d  max=%d  delta=%+d\n", first, last, max, last-first
+                    printf "  FD breakdown:  sockets start=%d end=%d | tmp_files start=%d end=%d\n", first_sock, last_sock, first_tmp, last_tmp
+                    if(last-first > 50)
+                        printf "  WARNING: FD count grew by %d — possible handle leak\n", last-first
+                }
+            }' "$FD_CSV"
         fi
 
         # Disk usage

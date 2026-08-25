@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
@@ -19,6 +20,40 @@ from app.models import Report, RequestReport, RuleHit
 from app.utils.content import normalize_rule_fqdn
 
 logger = logging.getLogger(__name__)
+
+_fd_log = logging.getLogger(__name__ + ".fds")
+
+
+def _fd_snapshot() -> dict:
+    """Read /proc/self/fd and return counts by type + paths of /tmp handles."""
+    fd_dir = f"/proc/{os.getpid()}/fd"
+    counts = {"total": 0, "socket": 0, "pipe": 0, "tmp": 0, "file": 0, "other": 0}
+    tmp_paths: list[str] = []
+    try:
+        for name in os.listdir(fd_dir):
+            counts["total"] += 1
+            try:
+                target = os.readlink(f"{fd_dir}/{name}")
+            except OSError:
+                continue
+            if target.startswith("socket:"):
+                counts["socket"] += 1
+            elif target.startswith("pipe:"):
+                counts["pipe"] += 1
+            elif target.startswith("/tmp"):
+                counts["tmp"] += 1
+                tmp_paths.append(target)
+            elif target.startswith("/"):
+                counts["file"] += 1
+            else:
+                counts["other"] += 1
+    except OSError:
+        pass
+    counts["tmp_paths"] = tmp_paths
+    return counts
+
+
+_fd_baseline: int | None = None
 
 
 class ProcessorService:
@@ -313,11 +348,37 @@ class ProcessorService:
         """
         logger.info(f"Starting archive processing: {archive_path}")
 
+        global _fd_baseline
+        fds_before = _fd_snapshot()
+        if _fd_baseline is None:
+            _fd_baseline = fds_before["total"]
+        drift = fds_before["total"] - _fd_baseline
+        _fd_log.debug(
+            "FDs before processing: total=%d (drift=%+d) sockets=%d pipes=%d tmp=%d files=%d tmp_paths=%s",
+            fds_before["total"], drift,
+            fds_before["socket"], fds_before["pipe"],
+            fds_before["tmp"], fds_before["file"],
+            fds_before["tmp_paths"] if fds_before["tmp_paths"] else "[]",
+        )
+        if drift > 20:
+            _fd_log.warning("FD drift +%d — possible handle accumulation (total=%d)", drift, fds_before["total"])
+
         # Process with insights-core
         cluster_id, results_json = self.process_with_insights_core(archive_path)
 
         # Save to database
         rules_count = self.save_results(db, cluster_id, results_json, request_id)
+
+        fds_after = _fd_snapshot()
+        leaked = fds_after["total"] - fds_before["total"]
+        if leaked != 0:
+            _fd_log.warning(
+                "FD delta after archive: %+d (before=%d after=%d) — new tmp=%s",
+                leaked, fds_before["total"], fds_after["total"],
+                [p for p in fds_after["tmp_paths"] if p not in fds_before["tmp_paths"]],
+            )
+        else:
+            _fd_log.debug("FD delta: 0 (total=%d) — no handles left open", fds_after["total"])
 
         logger.info(f"Completed processing for cluster {cluster_id}")
         return cluster_id, rules_count
