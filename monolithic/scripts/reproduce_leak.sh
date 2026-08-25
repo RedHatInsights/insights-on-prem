@@ -245,7 +245,7 @@ if [ ! -x "$PYTHON" ]; then
     exit 1
 fi
 
-TOTAL_MONITOR_MIN=$((DURATION_MIN + COOLDOWN_MIN))
+TOTAL_MONITOR_MIN=$((DURATION_MIN + COOLDOWN_MIN + 60))
 
 echo "  Compose dir: $COMPOSE_DIR"
 echo "  Duration:    ${DURATION_MIN} minutes (+ ${COOLDOWN_MIN} min cool-down)"
@@ -474,7 +474,7 @@ echo ""
 wait "$SEND_PID" 2>/dev/null || true
 SEND_PID=""
 
-# Kill progress reporter and print final count
+# Kill progress reporter; switch to inline output
 kill "$PROGRESS_PID" 2>/dev/null || true
 wait "$PROGRESS_PID" 2>/dev/null || true
 PROGRESS_PID=""
@@ -482,42 +482,55 @@ FINAL_COUNT=$(podman logs insights-app 2>&1 | grep -c "Starting archive processi
 FINAL_COUNT=$((FINAL_COUNT - BASELINE_PROCESSED))
 [ "$FINAL_COUNT" -lt 0 ] && FINAL_COUNT=0
 echo "  Archives processed by app at load stop: $FINAL_COUNT"
-
-# If cooldown=0: wait for the app to drain all queued archives
-if [ -n "$WAIT_FOR_PROCESSED" ] || [ "$COOLDOWN_MIN" -eq 0 ]; then
-    echo ""
-    echo "=== Waiting for app to finish processing all archives (cooldown=0) ==="
-    LAST_COUNT=-1
-    STABLE_SECS=0
-    while true; do
-        sleep 5
-        COUNT=$(podman logs insights-app 2>&1 | grep -c "Starting archive processing" 2>/dev/null || echo 0)
-        DELTA=$((COUNT - BASELINE_PROCESSED))
-        [ "$DELTA" -lt 0 ] && DELTA=0
-        if [ "$DELTA" -eq "$LAST_COUNT" ]; then
-            STABLE_SECS=$((STABLE_SECS + 5))
-            echo "  App processed: $DELTA archives (stable for ${STABLE_SECS}s)"
-            if [ "$STABLE_SECS" -ge 30 ]; then
-                echo "  Processing complete."
-                break
-            fi
-        else
-            STABLE_SECS=0
-            LAST_COUNT="$DELTA"
-            echo "  App processed: $DELTA archives"
-        fi
-    done
-fi
-
 echo ""
+
+# Cooldown timer starts now; drain tracking runs inside the window.
+# --wait extends beyond the timer if processing isn't stable yet.
+COOLDOWN_END=$((SECONDS + COOLDOWN_MIN * 60))
+LAST_CD=-1
+STABLE_CD=0
+DRAINED=0
+
 if [ "$COOLDOWN_MIN" -gt 0 ]; then
-    echo "=== Cool-down (${COOLDOWN_MIN} min, no archives sent — watching memory) ==="
-    # Wait for monitor to finish (it runs for DURATION_MIN + COOLDOWN_MIN)
-    if [ -n "$MONITOR_PID" ] && kill -0 "$MONITOR_PID" 2>/dev/null; then
-        wait "$MONITOR_PID" 2>/dev/null || true
-    fi
-    MONITOR_PID=""
+    echo "=== Cool-down (${COOLDOWN_MIN} min, no archives sent — watching memory + processing) ==="
+elif [ -n "$WAIT_FOR_PROCESSED" ]; then
+    echo "=== Waiting for app to finish processing all archives ==="
 fi
+
+while [ "$SECONDS" -lt "$COOLDOWN_END" ] || { [ -n "$WAIT_FOR_PROCESSED" ] && [ "$DRAINED" -eq 0 ]; }; do
+    sleep 10
+    COUNT=$(podman logs insights-app 2>&1 | grep -c "Starting archive processing" 2>/dev/null || echo 0)
+    DELTA=$((COUNT - BASELINE_PROCESSED))
+    [ "$DELTA" -lt 0 ] && DELTA=0
+
+    if [ "$DELTA" -eq "$LAST_CD" ]; then
+        STABLE_CD=$((STABLE_CD + 10))
+        if [ "$STABLE_CD" -ge 30 ] && [ "$DRAINED" -eq 0 ]; then
+            DRAINED=1
+            echo "  [$(date +%H:%M:%S)] App processed: $DELTA archives — processing complete"
+        fi
+    else
+        STABLE_CD=0
+        LAST_CD="$DELTA"
+        DRAINED=0
+    fi
+
+    REMAINING=0
+    [ "$SECONDS" -lt "$COOLDOWN_END" ] && REMAINING=$(( (COOLDOWN_END - SECONDS + 59) / 60 ))
+
+    if [ "$DRAINED" -eq 0 ]; then
+        echo "  [$(date +%H:%M:%S)] App processed: $DELTA archives (still processing, ${REMAINING}min remaining)"
+    elif [ "$REMAINING" -gt 0 ]; then
+        echo "  [$(date +%H:%M:%S)] App processed: $DELTA archives (${REMAINING}min remaining)"
+    fi
+done
+
+# Kill monitor explicitly (started with a buffer duration)
+if [ -n "$MONITOR_PID" ] && kill -0 "$MONITOR_PID" 2>/dev/null; then
+    kill "$MONITOR_PID" 2>/dev/null || true
+    wait "$MONITOR_PID" 2>/dev/null || true
+fi
+MONITOR_PID=""
 
 echo ""
 echo "Done."
