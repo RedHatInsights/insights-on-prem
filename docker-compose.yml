@@ -36,6 +36,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
+      - ./app:/app/app:z
       - ./migrations:/app/migrations:z
       - ./tests:/app/tests:z
       - ./config.yml:/app/config.yml:z

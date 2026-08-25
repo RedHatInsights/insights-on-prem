@@ -5,13 +5,14 @@ import logging
 import os
 import tempfile
 from datetime import datetime, timezone
-from queue import Full, Queue
+from queue import Full
 
 from fastapi import UploadFile
 
 from app.config import AppConfig
 from app.exceptions import ProcessorBusyError, ValidationError
 from app.schemas import UploadResponse
+from app.services.archive_processor import ArchiveQueue
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,7 @@ logger = logging.getLogger(__name__)
 class UploadService:
     """Service for handling archive uploads and processing orchestration."""
 
-    def __init__(self, config: AppConfig, archive_queue: Queue):
+    def __init__(self, config: AppConfig, archive_queue: ArchiveQueue):
         self.config = config
         self.archive_queue = archive_queue
 

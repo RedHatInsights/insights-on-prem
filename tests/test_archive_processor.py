@@ -3,14 +3,15 @@
 import os
 import tempfile
 from queue import Full
-from unittest.mock import Mock, PropertyMock, patch
+from threading import Event
+from unittest.mock import Mock
 
 import pytest
 
 from app.services.archive_processor import ArchiveProcessor
 
 
-def _make_processor(process_archive=None, queue=None, queue_size=10):
+def _make_processor(process_archive=None, queue_size=10):
     processor_service = Mock()
     processor_service.process_archive.side_effect = process_archive
     if process_archive is None:
@@ -23,7 +24,6 @@ def _make_processor(process_archive=None, queue=None, queue_size=10):
         processor_service,
         session_factory,
         queue_size=queue_size,
-        queue=queue,
     )
     return processor, processor_service, session_factory, processor.queue
 
@@ -89,8 +89,8 @@ def test_processor_consumes_queue_on_single_thread():
 
     processor.start()
     try:
-        queue.put((temp_path_1, "req-1"))
-        queue.put((temp_path_2, "req-2"))
+        queue.put_nowait((temp_path_1, "req-1"))
+        queue.put_nowait((temp_path_2, "req-2"))
         stopped = processor.stop(timeout=5)
     except Exception:
         processor.stop(timeout=5)
@@ -103,26 +103,48 @@ def test_processor_consumes_queue_on_single_thread():
 
 
 def test_stop_on_never_started_thread():
-    """Test stop is a no-op if the thread was never started."""
-    processor, _service, _factory, _queue = _make_processor()
+    """Test stop closes the queue even if the thread was never started."""
+    processor, _service, _factory, queue = _make_processor()
     assert processor.stop(timeout=1)
+    with pytest.raises(Full):
+        queue.put_nowait(("a", "req-1"))
 
 
-def test_stop_retries_sentinel_after_queue_full():
-    """Test stop retries enqueueing _STOP if a previous put timed out."""
-    queue = Mock()
-    queue.put.side_effect = [Full, None]
-    processor, _service, _factory, _queue = _make_processor(queue=queue)
+def test_stop_rejects_new_jobs_and_drains_remaining():
+    """Test stop refuses new work and finishes jobs already in the queue."""
+    processed = []
+    hold = Event()
+    in_first_job = Event()
 
-    with (
-        patch.object(ArchiveProcessor, "ident", PropertyMock(return_value=1)),
-        patch.object(processor, "join"),
-        patch.object(processor, "is_alive", return_value=False),
-    ):
-        processor.stop(timeout=0.5)
-        assert not processor._stop_requested
-        assert queue.put.call_count == 1
+    def process_archive(_db, _path, request_id):
+        processed.append(request_id)
+        if request_id == "req-1":
+            in_first_job.set()
+            hold.wait(timeout=5)
+        return ("cluster", 1)
 
-        processor.stop(timeout=0.5)
-        assert processor._stop_requested
-        assert queue.put.call_count == 2
+    processor, _service, _factory, queue = _make_processor(
+        process_archive, queue_size=5
+    )
+    temp_path_1 = _temp_archive()
+    temp_path_2 = _temp_archive()
+
+    processor.start()
+    try:
+        queue.put_nowait((temp_path_1, "req-1"))
+        assert in_first_job.wait(timeout=5)
+        queue.put_nowait((temp_path_2, "req-2"))
+        queue.close()
+        with pytest.raises(Full):
+            queue.put_nowait(("unused", "req-3"))
+        hold.set()
+        stopped = processor.stop(timeout=5)
+    except Exception:
+        hold.set()
+        processor.stop(timeout=5)
+        raise
+
+    assert stopped
+    assert processed == ["req-1", "req-2"]
+    assert not os.path.exists(temp_path_1)
+    assert not os.path.exists(temp_path_2)
