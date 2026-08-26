@@ -59,6 +59,17 @@ CLIENT_CA_PATH = os.path.join(TLS_DIR, "client-ca", "ca.crt")
 async def lifespan(app: FastAPI):
     config = load_config()
 
+    # Ask glibc to trim the heap top back to the OS immediately whenever it
+    # becomes free, rather than waiting for the default 128 KB threshold.
+    # Combined with the malloc_trim(0) call after each archive, this makes
+    # glibc as aggressive as possible about returning pages during high load.
+    # Has no effect when jemalloc is active (LD_PRELOAD overrides glibc malloc).
+    try:
+        import ctypes
+        ctypes.CDLL("libc.so.6").mallopt(-1, 0)  # M_TRIM_THRESHOLD = 0
+    except Exception:
+        pass
+
     # Ensure temp upload directory exists
     os.makedirs(config.temp_upload_dir, exist_ok=True)
     logger.info(f"Temp upload directory: {config.temp_upload_dir}")

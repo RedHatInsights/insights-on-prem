@@ -189,6 +189,16 @@ class ProcessorService:
                 # Initialize broker
                 ctx, broker = initialize_broker(extraction.tmp_dir)
 
+                # ctx.all_files holds ~1 MB of path strings built during archive
+                # type detection (list(get_all_files(...))).  Detection is done;
+                # specs find their files via glob on ctx.root, not via all_files.
+                # The only consumer of all_files after this point is
+                # Formatter.show_dropped(), which is disabled (dropped=False).
+                # Clearing it here frees the strings before run_components so
+                # malloc_trim can reclaim the brk pages within the same archive
+                # processing cycle rather than waiting until the next idle period.
+                ctx.all_files = []
+
                 try:
                     # Run components with formatter
                     output = StringIO()
@@ -211,6 +221,9 @@ class ProcessorService:
                     # insights-core that lacks Broker.cleanup().
                     if hasattr(broker, 'cleanup'):
                         broker.cleanup()
+                    # Drop local refs now so the brk strings are already freed
+                    # when gc.collect() + malloc_trim(0) run in the caller.
+                    del broker, ctx
 
         except Exception as e:
             logger.error(f"insights-core processing failed: {e}", exc_info=True)
