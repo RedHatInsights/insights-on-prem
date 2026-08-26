@@ -1,4 +1,4 @@
-FROM registry.redhat.io/lightspeed-services-ocp/ocp-rules-rhel9:2026.08.12
+FROM registry.redhat.io/lightspeed-services-ocp/ocp-rules-rhel9:2026.08.25
 
 USER root
 
