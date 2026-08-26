@@ -102,9 +102,15 @@ while true; do
         echo "${TIMESTAMP},${ELAPSED_MIN},${CPU_PERC},${MEM_USAGE},${MEM_LIMIT},${MEM_PERC}" \
             >> "$OUTPUT_DIR/${container}_podman_stats.csv"
 
-        # Find the process with the largest VmRSS (the actual worker, not
-        # a uvicorn --reload master or a QEMU wrapper).
-        PROC_DATA=$(podman exec "$container" sh -c '
+        # Single exec per container: collects process memory, FD counts, and
+        # disk usage in one shot. Disk paths passed as $1 to avoid variable
+        # expansion inside the single-quoted script body.
+        # NOTE: never read /proc/<pid>/fd/1 inside exec — it is the app's
+        # stdout pipe and blocks indefinitely, leaving grep orphaned in the
+        # cgroup when the exec session is closed from the host side.
+        DISK_PATHS=$(disk_paths_for "$container")
+        PROC_MEM=""; PROC_FD=""; DISK_MB=""
+        COMBINED=$(podman exec "$container" sh -c '
             TARGET_PID=1
             MAX_RSS=0
             for p in /proc/[0-9]*/status; do
@@ -115,42 +121,35 @@ while true; do
                     TARGET_PID=$pid
                 fi
             done
-            # Memory fields
             mem=$(grep -E "VmSize|VmRSS|VmData|VmStk" "/proc/$TARGET_PID/status" 2>/dev/null \
-                | awk "{print \$2}" | tr "\n" ",")
-            # Open FD count + breakdown by type
+                | awk '"'"'{print $2}'"'"' | tr "\n" ",")
             fd_dir="/proc/$TARGET_PID/fd"
             fd_total=$(ls "$fd_dir" 2>/dev/null | wc -l)
             fd_sockets=0; fd_pipes=0; fd_files=0; fd_tmp=0
             for fd in "$fd_dir"/*; do
-                target=$(readlink "$fd" 2>/dev/null) || continue
-                case "$target" in
-                    socket:*)  fd_sockets=$((fd_sockets+1)) ;;
-                    pipe:*)    fd_pipes=$((fd_pipes+1)) ;;
-                    /tmp/*)    fd_tmp=$((fd_tmp+1)) ;;
-                    /*)        fd_files=$((fd_files+1)) ;;
+                t=$(readlink "$fd" 2>/dev/null) || continue
+                case "$t" in
+                    socket:*) fd_sockets=$((fd_sockets+1)) ;;
+                    pipe:*)   fd_pipes=$((fd_pipes+1)) ;;
+                    /tmp/*)   fd_tmp=$((fd_tmp+1)) ;;
+                    /*)       fd_files=$((fd_files+1)) ;;
                 esac
             done
-            printf "%s%d,%d,%d,%d,%d\n" "$mem" "$fd_total" "$fd_sockets" "$fd_pipes" "$fd_tmp" "$fd_files"
-        ' 2>/dev/null) || true
+            printf "%s%d,%d,%d,%d,%d\n" \
+                "$mem" $fd_total $fd_sockets $fd_pipes $fd_tmp $fd_files
+            du -sm $1 2>/dev/null | awk '"'"'{s+=$1} END{print s+0}'"'"'
+        ' -- "$DISK_PATHS" 2>/dev/null) || true
 
-        if [ -n "$PROC_DATA" ]; then
-            PROC_MEM=$(echo "$PROC_DATA" | cut -d',' -f1-4 | sed 's/,$//')
-            PROC_FD=$(echo  "$PROC_DATA" | cut -d',' -f5-)
-            echo "${TIMESTAMP},${ELAPSED_MIN},${PROC_MEM}" \
+        if [ -n "$COMBINED" ]; then
+            PROC_MEM_FD=$(printf '%s\n' "$COMBINED" | head -1)
+            DISK_MB=$(printf '%s\n' "$COMBINED" | tail -1)
+            PROC_MEM=$(echo "$PROC_MEM_FD" | cut -d',' -f1-4 | sed 's/,$//')
+            PROC_FD=$(echo  "$PROC_MEM_FD" | cut -d',' -f5-)
+            [ -n "$PROC_MEM" ] && echo "${TIMESTAMP},${ELAPSED_MIN},${PROC_MEM}" \
                 >> "$OUTPUT_DIR/${container}_process_memory.csv"
-            echo "${TIMESTAMP},${ELAPSED_MIN},${PROC_FD}" \
+            [ -n "$PROC_FD"  ] && echo "${TIMESTAMP},${ELAPSED_MIN},${PROC_FD}" \
                 >> "$OUTPUT_DIR/${container}_fd_count.csv"
-        fi
-
-        # Disk usage inside container
-        DISK_MB=""
-        PATHS=$(disk_paths_for "$container")
-        if [ -n "$PATHS" ]; then
-            DISK_MB=$(podman exec "$container" sh -c "du -sm $PATHS 2>/dev/null | awk '{s+=\$1} END{print s+0}'" 2>/dev/null) || true
-        fi
-        if [ -n "$DISK_MB" ]; then
-            echo "${TIMESTAMP},${ELAPSED_MIN},${DISK_MB}" \
+            [ -n "$DISK_MB"  ] && echo "${TIMESTAMP},${ELAPSED_MIN},${DISK_MB}" \
                 >> "$OUTPUT_DIR/${container}_disk_usage.csv"
         fi
 

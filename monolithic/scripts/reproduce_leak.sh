@@ -351,7 +351,7 @@ fi
 # --- Check insights-core fix status ---
 echo ""
 echo "=== Checking insights-core fix status ==="
-FIX_CHECK=$(podman exec insights-app python3 -c "
+FIX_CHECK=$(timeout 30 podman exec insights-app python3 -c "
 import inspect, insights.core.dr as dr
 src = inspect.getsource(dr.run)
 if '__traceback__ = None' in src or '__traceback__=None' in src:
@@ -380,14 +380,18 @@ echo "=== Warm-up (uploading 3 archives to load insights-core components) ==="
     $( [ -n "$UPLOAD_URL" ] && echo "--url $UPLOAD_URL" ) &
 WARMUP_PID=$!
 
-# Wait for 3 archives to be processed (watch the logs)
+# Wait for 3 archives to be processed (watch the logs).
+# Use --since with the warmup start time so this is O(warmup duration),
+# not O(total container log size).
+WARMUP_SINCE_TS=$(date +%s)
 WARMUP_COUNT=0
 WARMUP_TIMEOUT=120
 WARMUP_WAITED=0
 while [ "$WARMUP_COUNT" -lt 3 ] && [ "$WARMUP_WAITED" -lt "$WARMUP_TIMEOUT" ]; do
     sleep 2
     WARMUP_WAITED=$((WARMUP_WAITED + 2))
-    WARMUP_COUNT=$(podman logs insights-app 2>&1 | grep -c "Starting archive processing" || echo 0)
+    WARMUP_COUNT=$(podman logs --since "$WARMUP_SINCE_TS" insights-app 2>&1 \
+        | grep -c "Starting archive processing" || echo 0)
     echo "  Warm-up: ${WARMUP_COUNT}/3 archives processed..."
 done
 
@@ -404,6 +408,9 @@ fi
 BASELINE_MEM=$(podman stats --no-stream --format "{{.MemUsage}}" insights-app 2>/dev/null | awk '{print $1}' | sed 's/[A-Za-z]*//g')
 echo "  Baseline memory: ${BASELINE_MEM} MiB"
 BASELINE_PROCESSED=$(podman logs insights-app 2>&1 | grep -c "Starting archive processing" || echo 0)
+# Unix timestamp used with `podman logs --since` so progress loops only scan
+# new log lines instead of re-reading the entire log on every iteration.
+LOG_SINCE_TS=$(date +%s)
 echo ""
 
 # --- Start monitoring (after warm-up, so baseline is clean) ---
@@ -454,9 +461,8 @@ echo "  Load generator PID: $SEND_PID"
 (
     while true; do
         sleep 30
-        COUNT=$(podman logs insights-app 2>&1 | grep -c "Starting archive processing" 2>/dev/null || echo 0)
-        DELTA=$((COUNT - BASELINE_PROCESSED))
-        [ "$DELTA" -lt 0 ] && DELTA=0
+        DELTA=$(podman logs --since "$LOG_SINCE_TS" insights-app 2>&1 \
+            | grep -c "Starting archive processing" 2>/dev/null || echo 0)
         echo "  [$(date +%H:%M:%S)] App processed: $DELTA archives"
     done
 ) &
@@ -478,8 +484,8 @@ SEND_PID=""
 kill "$PROGRESS_PID" 2>/dev/null || true
 wait "$PROGRESS_PID" 2>/dev/null || true
 PROGRESS_PID=""
-FINAL_COUNT=$(podman logs insights-app 2>&1 | grep -c "Starting archive processing" 2>/dev/null || echo 0)
-FINAL_COUNT=$((FINAL_COUNT - BASELINE_PROCESSED))
+FINAL_COUNT=$(podman logs --since "$LOG_SINCE_TS" insights-app 2>&1 \
+    | grep -c "Starting archive processing" 2>/dev/null || echo 0)
 [ "$FINAL_COUNT" -lt 0 ] && FINAL_COUNT=0
 echo "  Archives processed by app at load stop: $FINAL_COUNT"
 echo ""
@@ -499,8 +505,8 @@ fi
 
 while [ "$SECONDS" -lt "$COOLDOWN_END" ] || { [ -n "$WAIT_FOR_PROCESSED" ] && [ "$DRAINED" -eq 0 ]; }; do
     sleep 10
-    COUNT=$(podman logs insights-app 2>&1 | grep -c "Starting archive processing" 2>/dev/null || echo 0)
-    DELTA=$((COUNT - BASELINE_PROCESSED))
+    DELTA=$(podman logs --since "$LOG_SINCE_TS" insights-app 2>&1 \
+        | grep -c "Starting archive processing" 2>/dev/null || echo 0)
     [ "$DELTA" -lt 0 ] && DELTA=0
 
     if [ "$DELTA" -eq "$LAST_CD" ]; then
