@@ -32,6 +32,12 @@ UV_NATIVE_TLS=1 uv pip install --python "$VENV_DIR/bin/python3" \
     --index-url https://nexus.corp.redhat.com/repository/obsint-pypi/simple \
     -U molodec
 
+echo "Installing process_archive.py dependencies ..."
+UV_NATIVE_TLS=1 uv pip install --python "$VENV_DIR/bin/python3" \
+    --index-url https://nexus.corp.redhat.com/repository/obsint-pypi/simple \
+    --extra-index-url https://pypi.org/simple \
+    insights-core ccx-rules-ocp pyyaml
+
 echo ""
 echo "Done. venv ready at $VENV_DIR"
-echo "reproduce_leak.sh will use it automatically."
+echo "reproduce_leak.sh and process_archive.py will use it automatically."

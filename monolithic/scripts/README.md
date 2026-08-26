@@ -66,13 +66,23 @@ podman logs -f insights-app
 
 ### `setup_venv.sh`
 
-Creates a Python venv at `scripts/venv/` with molodec installed from the
-internal Red Hat PyPI using `uv`. Called automatically by `reproduce_leak.sh`
-if the venv doesn't exist yet.
+Creates a Python venv at `scripts/venv/` with molodec, insights-core,
+ccx-rules-ocp, and pyyaml installed from the internal Red Hat PyPI using `uv`.
+Called automatically by `reproduce_leak.sh` if the venv doesn't exist yet.
 
 ```bash
 ./scripts/setup_venv.sh        # create venv
 rm -rf scripts/venv             # to recreate from scratch
+```
+
+If the venv already exists and you need to add the process_archive.py deps:
+
+```bash
+source scripts/venv/bin/activate
+UV_NATIVE_TLS=1 uv pip install \
+    --index-url https://nexus.corp.redhat.com/repository/obsint-pypi/simple \
+    --extra-index-url https://pypi.org/simple \
+    insights-core ccx-rules-ocp pyyaml
 ```
 
 ### `send_archives.py`
@@ -119,6 +129,67 @@ python3 scripts/send_archives.py --use-molodec --duration 60
 - **Max-exceptions** (`--max-exceptions-archive`) — a static archive designed
   to trigger the maximum number of exceptions per upload. Each upload gets a
   random cluster ID so the app treats them as distinct clusters.
+
+### `process_archive.py`
+
+Runs insights-core archive processing directly against a local archive file —
+no HTTP server, no database. Useful for isolating the processing pipeline from
+infrastructure, debugging rule-hit output, and measuring per-archive memory
+growth in a tight loop.
+
+```bash
+# Single run — prints rule hits and RSS to stderr, raw JSON to stdout
+python scripts/process_archive.py scripts/test_insights_archive-molodec.tgz
+
+# Memory loop — process the same archive 20 times, watch RSS grow (or not)
+python scripts/process_archive.py scripts/test_insights_archive-molodec.tgz --count 20
+
+# Verbose — include insights-core DEBUG logs
+python scripts/process_archive.py scripts/test_insights_archive-molodec.tgz --count 5 -v
+
+# Save raw JSON output to a file for inspection
+python scripts/process_archive.py scripts/test_insights_archive-molodec.tgz --output /tmp/results.json
+
+# Custom config
+python scripts/process_archive.py my.tar.gz --config /path/to/config.yml
+```
+
+**Options:**
+
+| Flag          | Default              | Description                                         |
+|---------------|----------------------|-----------------------------------------------------|
+| `archive`     | (required)           | Path to `.tar` / `.tar.gz` / `.tgz` archive         |
+| `--config`    | `monolithic/config.yml` | Path to config.yml                               |
+| `--count N`   | `1`                  | Process the archive N times (memory leak testing)   |
+| `--output FILE` | stdout             | Write raw JSON results to FILE (last iteration only) |
+| `-v`          | off                  | Set log level to DEBUG                              |
+
+**Per-iteration stderr output:**
+
+```
+RSS at start: 310.2 MB
+[1/20]  cluster=abc-123  rules=7  rss_before=310.2 MB  rss_after=316.8 MB  delta=+6.6 MB  total_growth=+6.6 MB  fds=42 (delta=0)
+[2/20]  cluster=abc-123  rules=7  rss_before=316.8 MB  rss_after=317.4 MB  delta=+0.6 MB  total_growth=+7.2 MB  fds=42 (delta=0)
+```
+
+After each iteration the script runs `gc.collect()` + `malloc_trim(0)` —
+the same post-processing cleanup as the real service — so memory numbers are
+directly comparable to production behavior.
+
+Requires the `scripts/venv` to have `insights-core`, `ccx-rules-ocp`, and
+`pyyaml` installed (see `setup_venv.sh` above). Run from the `monolithic/`
+directory or anywhere — it auto-adjusts the Python path.
+
+### `test_insights_archive-molodec.tgz`
+
+A realistic OCP archive generated with molodec, kept in the scripts directory
+as a ready-to-use test fixture for `process_archive.py`. Generate a fresh one
+with:
+
+```bash
+source scripts/venv/bin/activate
+molodec archive generate scripts/test_insights_archive-molodec.tgz
+```
 
 ### `monitor.sh`
 
