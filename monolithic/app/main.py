@@ -59,14 +59,22 @@ CLIENT_CA_PATH = os.path.join(TLS_DIR, "client-ca", "ca.crt")
 async def lifespan(app: FastAPI):
     config = load_config()
 
-    # Ask glibc to trim the heap top back to the OS immediately whenever it
-    # becomes free, rather than waiting for the default 128 KB threshold.
-    # Combined with the malloc_trim(0) call after each archive, this makes
-    # glibc as aggressive as possible about returning pages during high load.
-    # Has no effect when jemalloc is active (LD_PRELOAD overrides glibc malloc).
     try:
         import ctypes
-        ctypes.CDLL("libc.so.6").mallopt(-1, 0)  # M_TRIM_THRESHOLD = 0
+        libc = ctypes.CDLL("libc.so.6")
+        # Disable transparent huge pages for this process.
+        # khugepaged (the kernel THP daemon) promotes 4 KB pages to 2 MB huge
+        # pages in the background.  Each promotion can add up to 2 MB to the
+        # cgroup memory counter even with no application activity, causing the
+        # "idle memory climbing" effect.  PR_SET_THP_DISABLE opts this process
+        # out without affecting any other process or requiring host privileges.
+        PR_SET_THP_DISABLE = 41
+        libc.prctl(PR_SET_THP_DISABLE, 1, 0, 0, 0)
+
+        # Ask glibc to trim the brk top immediately whenever it becomes free,
+        # rather than waiting for the default 128 KB threshold.  No effect when
+        # mimalloc is active (mimalloc bypasses the brk heap for Python objects).
+        libc.mallopt(-1, 0)  # M_TRIM_THRESHOLD = 0
     except Exception:
         pass
 

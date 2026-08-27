@@ -40,9 +40,14 @@ USER 1001
 # Enable it in production via environment variable:
 #   LD_PRELOAD=/usr/lib64/libjemalloc.so.2
 #   MALLOC_CONF=background_thread:true,dirty_decay_ms:1000,muzzy_decay_ms:1000
-ENV PYTHONMALLOC=mimalloc
-    #MALLOC_TRIM_THRESHOLD_=65536 \
-    #MALLOC_MMAP_THRESHOLD_=65536
+ENV PYTHONMALLOC=mimalloc \
+    MIMALLOC_PURGE_DELAY=0 \
+    MIMALLOC_PURGE_DECOMMITS=1 \
+    MIMALLOC_ARENA_EAGER_COMMIT=0 \
+    MIMALLOC_LARGE_OS_PAGES=0 \
+    MIMALLOC_SHOW_STATS=1 \
+    MALLOC_TRIM_THRESHOLD=0 \
+    MALLOC_ARENA_MAX=1
 
 ENTRYPOINT []
 CMD ["python", "-m", "app.main"]

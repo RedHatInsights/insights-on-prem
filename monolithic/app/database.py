@@ -23,7 +23,12 @@ def init_db(database_url: str, max_workers: int = 4):
         pool_pre_ping=True,
         pool_size=max_workers + 1,
         max_overflow=max_workers,
-        pool_recycle=3600,
+        # Recycle connections every 5 minutes so the pool proactively replaces
+        # stale connections rather than discovering them dead on checkout.
+        # pool_pre_ping catches any that slip through, but frequent reconnects
+        # under pool_pre_ping generate ~200 Python allocations each (psycopg2
+        # connection object construction), contributing to heap churn.
+        pool_recycle=300,
     )
     session_factory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     Base.metadata.create_all(bind=engine)

@@ -1,7 +1,6 @@
 """Service for upload orchestration and validation."""
 
 import contextlib
-import gc
 import logging
 import os
 import tempfile
@@ -141,12 +140,6 @@ class UploadService:
                     )
                 finally:
                     db.close()
-                    gc.collect()
-                    try:
-                        import ctypes
-                        ctypes.CDLL("libc.so.6").malloc_trim(0)
-                    except Exception:
-                        pass
         finally:
             if os.path.exists(temp_file_path):
                 try:
