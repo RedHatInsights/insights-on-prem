@@ -22,9 +22,9 @@ spec:
       default: iop-e2e-tests
     - name: ACM_VERSION
       description: >-
-        ACM release channel suffix (e.g. "2.13"). Must match a channel
+        ACM release channel suffix (e.g. "2.17"). Must match a channel
         available in the redhat-operators catalog on the target OCP version.
-      default: "2.13"
+      default: "2.17"
     - name: OCP_VERSION
       description: >-
         OCP version for ephemeral clusters (e.g. "4.17"). Used as the
