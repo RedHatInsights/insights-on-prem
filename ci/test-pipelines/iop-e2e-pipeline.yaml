@@ -1,0 +1,770 @@
+# ITS managed via konflux-release-data (insights-on-prem-eaas-e2e)
+---
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  annotations:
+    pipelinesascode.tekton.dev/task: "[acm-install, import-managed-cluster, iop-deploy, iop-e2e-tests]"
+  name: iop-e2e-pipeline
+spec:
+  description: |
+    End-to-end test pipeline for Insights on Premise (IOP) using OpenShift CI
+    ephemeral HyperShift clusters. Provisions a hub and managed cluster,
+    installs ACM from the GA catalog, deploys IOP, imports the managed
+    cluster, and runs smoke tests.
+  params:
+    - name: SNAPSHOT
+      description: Konflux application snapshot JSON.
+      default: '{"components": [{"name":"insights-on-prem", "containerImage": "SNAPSHOT_REQUIRED"}]}'
+      type: string
+    - name: test-name
+      description: Konflux integration test name.
+      default: iop-e2e-tests
+    - name: ACM_VERSION
+      description: >-
+        ACM release channel suffix (e.g. "2.17"). Must match a channel
+        available in the redhat-operators catalog on the target OCP version.
+      default: "2.17"
+    - name: OCP_VERSION
+      description: >-
+        OCP version for ephemeral clusters (e.g. "4.17"). Used as the
+        release channel version in the OpenShift CI provisioning request.
+      default: "4.21"
+    - name: DEBUG_DUMP_CREDENTIALS
+      description: >-
+        When "true", print cluster kubeconfigs and admin passwords to logs.
+        Only enable for debugging ephemeral test failures.
+      default: "false"
+
+  tasks:
+    # ── Hub cluster (m5.2xlarge) ─────────────────────────────────────────
+    - name: provision-hub
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/openshift/konflux-tasks
+          - name: revision
+            value: main
+          - name: pathInRepo
+            value: tasks/provision-ephemeral-cluster/0.1/provision-ephemeral-cluster.yaml
+      params:
+        - name: ownerName
+          value: $(context.pipelineRun.name)
+        - name: ownerUid
+          value: $(context.pipelineRun.uid)
+        - name: workflow
+          value: hypershift-hostedcluster-workflow
+        - name: clusterProfile
+          value: aws-konflux-prod
+        - name: env
+          value: '{"COMPUTE_NODE_TYPE": "m5.2xlarge", "HYPERSHIFT_NODE_COUNT": "3", "HOSTED_MANAGEMENT_CLUSTER": "hosted-mgmt2"}'
+        - name: releases
+          value: '{"latest":{"release":{"channel":"stable","version":"$(params.OCP_VERSION)","architecture":"multi"}}}'
+
+    # ── Managed cluster (m5.xlarge) ──────────────────────────────────────
+    - name: provision-managed
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/openshift/konflux-tasks
+          - name: revision
+            value: main
+          - name: pathInRepo
+            value: tasks/provision-ephemeral-cluster/0.1/provision-ephemeral-cluster.yaml
+      params:
+        - name: ownerName
+          value: $(context.pipelineRun.name)
+        - name: ownerUid
+          value: $(context.pipelineRun.uid)
+        - name: workflow
+          value: hypershift-hostedcluster-workflow
+        - name: clusterProfile
+          value: aws-konflux-prod
+        - name: env
+          value: '{"COMPUTE_NODE_TYPE": "m5.xlarge", "HYPERSHIFT_NODE_COUNT": "3", "HOSTED_MANAGEMENT_CLUSTER": "hosted-mgmt2"}'
+        - name: releases
+          value: '{"latest":{"release":{"channel":"stable","version":"$(params.OCP_VERSION)","architecture":"multi"}}}'
+
+    # ── Install ACM on hub ──────────────────────────────────────────────
+    - name: acm-install
+      runAfter:
+        - provision-hub
+      params:
+        - name: ACM_VERSION
+          value: "$(params.ACM_VERSION)"
+        - name: hubClusterCredentialsSecretRef
+          value: $(tasks.provision-hub.results.secretRef)
+      taskSpec:
+        params:
+          - name: ACM_VERSION
+            type: string
+          - name: hubClusterCredentialsSecretRef
+            type: string
+        volumes:
+          - name: hub-credentials
+            secret:
+              secretName: $(params.hubClusterCredentialsSecretRef)
+        steps:
+          - name: install-acm
+            env:
+              - name: KUBECONFIG
+                value: /var/run/secrets/hub-cluster/kubeconfig
+              - name: ACM_VERSION
+                value: $(params.ACM_VERSION)
+            volumeMounts:
+              - name: hub-credentials
+                mountPath: /var/run/secrets/hub-cluster
+                readOnly: true
+            image: registry.redhat.io/openshift4/ose-cli:latest
+            script: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+
+              echo "=== Install ACM (release-${ACM_VERSION}) ==="
+
+              cat <<EOF | oc apply -f -
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: open-cluster-management
+              ---
+              apiVersion: operators.coreos.com/v1
+              kind: OperatorGroup
+              metadata:
+                name: default
+                namespace: open-cluster-management
+              spec:
+                targetNamespaces:
+                  - open-cluster-management
+              ---
+              apiVersion: operators.coreos.com/v1alpha1
+              kind: Subscription
+              metadata:
+                name: acm-operator-subscription
+                namespace: open-cluster-management
+              spec:
+                channel: release-${ACM_VERSION}
+                installPlanApproval: Automatic
+                name: advanced-cluster-management
+                source: redhat-operators
+                sourceNamespace: openshift-marketplace
+              EOF
+
+              echo "Waiting for ACM CRDs..."
+              ELAPSED=0
+              until oc get crd multiclusterhubs.operator.open-cluster-management.io &>/dev/null; do
+                if [[ "$ELAPSED" -ge 600 ]]; then
+                  echo "ERROR: ACM CRDs not found after 10 minutes"
+                  echo "--- Subscription status ---"
+                  oc get subscription acm-operator-subscription -n open-cluster-management -o yaml 2>/dev/null || true
+                  echo "--- CSVs ---"
+                  oc get csv -n open-cluster-management 2>/dev/null || true
+                  echo "--- CatalogSource pods ---"
+                  oc get pods -n openshift-marketplace 2>/dev/null || true
+                  exit 1
+                fi
+                sleep 10
+                ELAPSED=$((ELAPSED + 10))
+              done
+
+              echo "Waiting for MCH operator pod..."
+              until oc get pod -n open-cluster-management -l name=multiclusterhub-operator \
+                --no-headers 2>/dev/null | grep -q .; do
+                sleep 5
+              done
+              oc wait pod -n open-cluster-management -l name=multiclusterhub-operator \
+                --for=condition=Ready --timeout=300s
+
+              echo "Creating MultiClusterHub CR..."
+              cat <<'MCH' | oc apply -f -
+              apiVersion: operator.open-cluster-management.io/v1
+              kind: MultiClusterHub
+              metadata:
+                name: multiclusterhub
+                namespace: open-cluster-management
+              spec:
+                overrides:
+                  components:
+                  - name: app-lifecycle
+                    enabled: false
+                  - name: search
+                    enabled: false
+                  - name: submariner-addon
+                    enabled: false
+                  - name: volsync
+                    enabled: false
+              MCH
+
+              echo "Waiting for MultiClusterHub to reach Running state (timeout: 900s)..."
+              ELAPSED=0
+              while true; do
+                PHASE=$(oc get multiclusterhub multiclusterhub -n open-cluster-management \
+                  -o jsonpath='{.status.phase}' 2>/dev/null || true)
+                if [[ "$PHASE" == "Running" ]]; then
+                  echo "MultiClusterHub is Running"
+                  break
+                fi
+                if [[ "$ELAPSED" -ge 900 ]]; then
+                  echo "ERROR: MCH not Running after 900s (current phase: ${PHASE})"
+                  oc get multiclusterhub multiclusterhub -n open-cluster-management -o yaml
+                  exit 1
+                fi
+                if [[ $((ELAPSED % 60)) -eq 0 ]]; then
+                  echo "  MCH phase: ${PHASE:-unknown} (${ELAPSED}s elapsed)"
+                fi
+                sleep 15
+                ELAPSED=$((ELAPSED + 15))
+              done
+
+              echo "=== ACM installation complete ==="
+
+    # ── Import managed cluster into ACM hub ──────────────────────────────
+    - name: import-managed-cluster
+      runAfter:
+        - acm-install
+        - provision-managed
+      params:
+        - name: DEBUG_DUMP_CREDENTIALS
+          value: "$(params.DEBUG_DUMP_CREDENTIALS)"
+        - name: hubClusterCredentialsSecretRef
+          value: $(tasks.provision-hub.results.secretRef)
+        - name: managedClusterCredentialsSecretRef
+          value: $(tasks.provision-managed.results.secretRef)
+      taskSpec:
+        params:
+          - name: DEBUG_DUMP_CREDENTIALS
+            type: string
+          - name: hubClusterCredentialsSecretRef
+            type: string
+          - name: managedClusterCredentialsSecretRef
+            type: string
+        volumes:
+          - name: hub-credentials
+            secret:
+              secretName: $(params.hubClusterCredentialsSecretRef)
+          - name: managed-credentials
+            secret:
+              secretName: $(params.managedClusterCredentialsSecretRef)
+        steps:
+          - name: dump-credentials
+            env:
+              - name: DEBUG_DUMP_CREDENTIALS
+                value: "$(params.DEBUG_DUMP_CREDENTIALS)"
+            volumeMounts:
+              - name: hub-credentials
+                mountPath: /var/run/secrets/hub-cluster
+                readOnly: true
+              - name: managed-credentials
+                mountPath: /var/run/secrets/managed-cluster
+                readOnly: true
+            image: registry.redhat.io/openshift4/ose-cli:latest
+            script: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+
+              if [[ "${DEBUG_DUMP_CREDENTIALS}" != "true" ]]; then
+                echo "DEBUG_DUMP_CREDENTIALS is not 'true' — skipping."
+                exit 0
+              fi
+
+              echo "############################################################"
+              echo "# WARNING: cluster admin credentials follow.               #"
+              echo "# Ephemeral clusters are destroyed when this run ends.     #"
+              echo "############################################################"
+
+              for CLUSTER_LABEL in HUB MANAGED; do
+                if [[ "${CLUSTER_LABEL}" == "HUB" ]]; then
+                  CRED_PATH="/var/run/secrets/hub-cluster"
+                else
+                  CRED_PATH="/var/run/secrets/managed-cluster"
+                fi
+
+                API_SERVER=$(KUBECONFIG="${CRED_PATH}/kubeconfig" oc config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || echo "unknown")
+                PASSWORD=$(cat "${CRED_PATH}/kubeAdminPassword" 2>/dev/null || echo "unknown")
+
+                echo "=== ${CLUSTER_LABEL} CLUSTER ==="
+                echo "API Server:  ${API_SERVER}"
+                echo "Username:    kubeadmin"
+                echo "--- ${CLUSTER_LABEL} password ---"
+                echo "${PASSWORD}"
+                echo "--- ${CLUSTER_LABEL} kubeconfig (base64) ---"
+                base64 -w0 "${CRED_PATH}/kubeconfig"; echo
+              done
+
+          - name: import-cluster
+            env:
+              - name: KUBECONFIG
+                value: /var/run/secrets/hub-cluster/kubeconfig
+              - name: MANAGED_KUBECONFIG
+                value: /var/run/secrets/managed-cluster/kubeconfig
+            volumeMounts:
+              - name: hub-credentials
+                mountPath: /var/run/secrets/hub-cluster
+                readOnly: true
+              - name: managed-credentials
+                mountPath: /var/run/secrets/managed-cluster
+                readOnly: true
+            image: registry.redhat.io/openshift4/ose-cli:latest
+            script: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+
+              echo "=== Import managed cluster ==="
+
+              oc create namespace managed --dry-run=client -o yaml | oc apply -f -
+
+              cat <<'MC' | oc apply -f -
+              apiVersion: cluster.open-cluster-management.io/v1
+              kind: ManagedCluster
+              metadata:
+                name: managed
+                labels:
+                  cloud: auto-detect
+                  vendor: auto-detect
+              spec:
+                hubAcceptsClient: true
+              MC
+
+              oc create secret generic auto-import-secret \
+                -n managed \
+                --from-file=kubeconfig="${MANAGED_KUBECONFIG}" \
+                --dry-run=client -o yaml | oc apply -f -
+
+              echo "Waiting for managed cluster to be Available..."
+              oc wait managedcluster managed \
+                --for=condition=ManagedClusterConditionAvailable=True \
+                --timeout=300s || {
+                echo "ERROR: Managed cluster not Available"
+                oc get managedcluster managed -o yaml
+                oc --kubeconfig="${MANAGED_KUBECONFIG}" get pods -n open-cluster-management-agent -o wide || true
+                exit 1
+              }
+
+              echo "Waiting for addon deployment to spoke..."
+              ELAPSED=0
+              until oc get managedclusteraddon insights-operator-proxy -n managed &>/dev/null; do
+                if [[ "$ELAPSED" -ge 300 ]]; then
+                  echo "WARNING: insights-operator-proxy addon not deployed after 5 minutes"
+                  echo "--- ClusterManagementAddOn ---"
+                  oc get clustermanagementaddon insights-operator-proxy -o yaml 2>/dev/null || true
+                  echo "--- ManagedClusterAddOns in managed ---"
+                  oc get managedclusteraddon -n managed 2>/dev/null || true
+                  break
+                fi
+                sleep 10
+                ELAPSED=$((ELAPSED + 10))
+              done
+
+              if oc get managedclusteraddon insights-operator-proxy -n managed &>/dev/null; then
+                echo "Addon CR exists. Waiting for Available condition..."
+                oc wait managedclusteraddon insights-operator-proxy -n managed \
+                  --for=condition=Available=True --timeout=300s || {
+                  echo "WARNING: Addon not Available yet — continuing"
+                  oc get managedclusteraddon insights-operator-proxy -n managed -o yaml || true
+                }
+              fi
+
+              echo "=== Managed cluster import complete ==="
+
+    # ── Deploy IOP on hub ────────────────────────────────────────────────
+    - name: iop-deploy
+      runAfter:
+        - acm-install
+      params:
+        - name: SNAPSHOT
+          value: $(params.SNAPSHOT)
+        - name: hubClusterCredentialsSecretRef
+          value: $(tasks.provision-hub.results.secretRef)
+      taskSpec:
+        params:
+          - name: SNAPSHOT
+          - name: hubClusterCredentialsSecretRef
+            type: string
+        volumes:
+          - name: hub-credentials
+            secret:
+              secretName: $(params.hubClusterCredentialsSecretRef)
+          - name: iop-pull-secret
+            secret:
+              secretName: imagerepository-for-insights-on-prem-image-pull
+        steps:
+          - name: deploy-iop
+            env:
+              - name: SNAPSHOT
+                value: $(params.SNAPSHOT)
+              - name: KUBECONFIG
+                value: /var/run/secrets/hub-cluster/kubeconfig
+            volumeMounts:
+              - name: hub-credentials
+                mountPath: /var/run/secrets/hub-cluster
+                readOnly: true
+              - name: iop-pull-secret
+                mountPath: /var/run/secrets/iop-pull-secret
+                readOnly: true
+            image: registry.redhat.io/openshift4/ose-cli:latest
+            script: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+
+              echo "Installing dependencies..."
+              dnf -y install jq git >/dev/null 2>&1
+
+              echo "=== Deploy IOP ==="
+
+              echo "Cloning IOP repository from SNAPSHOT..."
+              GIT_URL=$(echo "${SNAPSHOT}" | jq -r '.components[] | select(.name == "insights-on-prem") | .source.git.url')
+              GIT_REVISION=$(echo "${SNAPSHOT}" | jq -r '.components[] | select(.name == "insights-on-prem") | .source.git.revision')
+              echo "Source: ${GIT_URL} @ ${GIT_REVISION}"
+              git clone -q "${GIT_URL}" /tmp/iop
+              cd /tmp/iop
+              git checkout -q "${GIT_REVISION}"
+
+              echo "Applying IOP deploy manifests..."
+              oc apply -f deploy/
+
+              # The Konflux-built image lives in a private repo. The deploy
+              # manifests reference an imagePullSecret (ccxdev-insights-on-prem-
+              # pull-secret) that does not exist on ephemeral clusters. Create it
+              # from the Konflux image-pull secret mounted into this task so the
+              # deployment can pull its own image.
+              echo "Creating IOP image pull secret..."
+              oc create secret generic ccxdev-insights-on-prem-pull-secret \
+                -n insights-on-prem \
+                --type=kubernetes.io/dockerconfigjson \
+                --from-file=.dockerconfigjson=/var/run/secrets/iop-pull-secret/.dockerconfigjson \
+                --dry-run=client -o yaml | oc apply -f -
+              oc secrets link insights-on-prem ccxdev-insights-on-prem-pull-secret \
+                --for=pull -n insights-on-prem
+
+              IOP_IMAGE=$(echo "${SNAPSHOT}" | jq -r '.components[] | select(.name == "insights-on-prem") | .containerImage')
+              echo "Overriding IOP image: ${IOP_IMAGE}"
+              oc set image deployment/insights-on-prem -n insights-on-prem \
+                "insights-on-prem=${IOP_IMAGE}"
+
+              echo "Waiting for cert-manager operator..."
+              ELAPSED=0
+              until oc get deployment cert-manager -n cert-manager &>/dev/null; do
+                if [[ "$ELAPSED" -ge 600 ]]; then
+                  echo "ERROR: cert-manager deployment not found after 10 minutes"
+                  oc get csv -n cert-manager-operator 2>/dev/null || true
+                  exit 1
+                fi
+                sleep 10
+                ELAPSED=$((ELAPSED + 10))
+              done
+              oc rollout status deployment/cert-manager -n cert-manager --timeout=300s
+              echo "cert-manager is ready"
+
+              echo "Waiting for IOP cert secrets (created by ACM Policy + cert-manager)..."
+              ELAPSED=0
+              until oc get secret insights-on-prem-server-tls -n insights-on-prem &>/dev/null && \
+                    oc get secret insights-on-prem-client-ca -n insights-on-prem &>/dev/null; do
+                if [[ "$ELAPSED" -ge 600 ]]; then
+                  echo "ERROR: Cert secrets not created after 10 minutes"
+                  echo "--- Policies ---"
+                  oc get policy -n insights-on-prem 2>/dev/null || true
+                  echo "--- Certificates ---"
+                  oc get certificate -n insights-on-prem 2>/dev/null || true
+                  echo "--- cert-manager pods ---"
+                  oc get pods -n cert-manager 2>/dev/null || true
+                  exit 1
+                fi
+                sleep 10
+                ELAPSED=$((ELAPSED + 10))
+              done
+              echo "Cert secrets are ready"
+
+              echo "Waiting for PostgreSQL..."
+              oc rollout status deployment/insights-postgres -n insights-on-prem --timeout=120s
+
+              echo "Waiting for IOP deployment..."
+              oc rollout status deployment/insights-on-prem -n insights-on-prem --timeout=300s
+
+              echo "=== IOP deployment complete ==="
+
+    # ── Smoke tests ──────────────────────────────────────────────────────
+    - name: iop-e2e-tests
+      runAfter:
+        - iop-deploy
+        - import-managed-cluster
+      params:
+        - name: SNAPSHOT
+          value: $(params.SNAPSHOT)
+        - name: PIPELINE_RUN_NAME
+          value: $(context.pipelineRun.name)
+        - name: PIPELINE_RUN_NAMESPACE
+          value: $(context.pipelineRun.namespace)
+        - name: hubClusterCredentialsSecretRef
+          value: $(tasks.provision-hub.results.secretRef)
+        - name: managedClusterCredentialsSecretRef
+          value: $(tasks.provision-managed.results.secretRef)
+      taskSpec:
+        params:
+          - name: SNAPSHOT
+          - name: PIPELINE_RUN_NAME
+          - name: PIPELINE_RUN_NAMESPACE
+          - name: hubClusterCredentialsSecretRef
+            type: string
+          - name: managedClusterCredentialsSecretRef
+            type: string
+        volumes:
+          - name: shared-data
+            emptyDir: {}
+          - name: hub-credentials
+            secret:
+              secretName: $(params.hubClusterCredentialsSecretRef)
+          - name: managed-credentials
+            secret:
+              secretName: $(params.managedClusterCredentialsSecretRef)
+        steps:
+          - name: read-test-filter
+            env:
+              - name: PIPELINE_RUN_NAME
+                value: "$(params.PIPELINE_RUN_NAME)"
+              - name: PIPELINE_RUN_NAMESPACE
+                value: "$(params.PIPELINE_RUN_NAMESPACE)"
+            volumeMounts:
+              - name: shared-data
+                mountPath: /shared
+            image: registry.redhat.io/openshift4/ose-cli:latest
+            script: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+              FILTER=$(oc get pipelinerun "${PIPELINE_RUN_NAME}" \
+                -n "${PIPELINE_RUN_NAMESPACE}" \
+                -o jsonpath='{.metadata.labels.debug\.iop/test-filter}' 2>/dev/null || true)
+              echo -n "${FILTER}" > /shared/test-filter
+              if [[ -n "${FILTER}" ]]; then
+                echo "Test filter from PipelineRun label: ${FILTER}"
+              else
+                echo "No test filter set — running all tests"
+              fi
+
+          - name: run-tests
+            env:
+              - name: KUBECONFIG
+                value: /var/run/secrets/hub-cluster/kubeconfig
+              - name: MANAGED_KUBECONFIG
+                value: /var/run/secrets/managed-cluster/kubeconfig
+            volumeMounts:
+              - name: shared-data
+                mountPath: /shared
+              - name: hub-credentials
+                mountPath: /var/run/secrets/hub-cluster
+                readOnly: true
+              - name: managed-credentials
+                mountPath: /var/run/secrets/managed-cluster
+                readOnly: true
+            image: registry.redhat.io/openshift4/ose-cli:latest
+            script: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+
+              TEST_FILTER=$(cat /shared/test-filter 2>/dev/null || true)
+              if [[ -n "${TEST_FILTER}" ]]; then
+                echo "=== IOP E2E Tests (filter: ${TEST_FILTER}) ==="
+              else
+                echo "=== IOP E2E Tests (all) ==="
+              fi
+              # TODO: use TEST_FILTER to select which tests to run
+
+              PASS=0
+              FAIL=0
+
+              check() {
+                local desc="$1"; shift
+                if "$@" >/dev/null 2>&1; then
+                  echo "  PASS: ${desc}"
+                  PASS=$((PASS + 1))
+                else
+                  echo "  FAIL: ${desc}"
+                  FAIL=$((FAIL + 1))
+                fi
+              }
+
+              echo "--- Hub cluster checks ---"
+              check "IOP deployment is Available" \
+                oc rollout status deployment/insights-on-prem -n insights-on-prem --timeout=10s
+              check "PostgreSQL deployment is Available" \
+                oc rollout status deployment/insights-postgres -n insights-on-prem --timeout=10s
+              check "IOP Route exists" \
+                oc get route insights-on-prem -n insights-on-prem
+              check "cert-manager operator is running" \
+                oc rollout status deployment/cert-manager -n cert-manager --timeout=10s
+              check "Server TLS secret exists" \
+                oc get secret insights-on-prem-server-tls -n insights-on-prem
+              check "Client CA secret exists" \
+                oc get secret insights-on-prem-client-ca -n insights-on-prem
+
+              echo "--- ACM checks ---"
+              check "MultiClusterHub is Running" \
+                test "$(oc get multiclusterhub multiclusterhub -n open-cluster-management \
+                  -o jsonpath='{.status.phase}')" = "Running"
+              check "Managed cluster is Available" \
+                oc get managedcluster managed
+
+              echo "--- Managed cluster checks ---"
+              check "Klusterlet agent is running on managed" \
+                oc --kubeconfig="${MANAGED_KUBECONFIG}" get pods -n open-cluster-management-agent \
+                  --field-selector=status.phase=Running
+
+              # TODO: Add actual e2e API tests:
+              # - Health check via IOP pod exec (mTLS prevents external curl)
+              # - Archive upload (POST /api/ingress/v1/upload)
+              # - Report retrieval (GET /api/v2/cluster/{id}/reports)
+              # - Spoke proxy connectivity
+              # - Insights Operator reconfiguration verification
+              echo "--- Placeholder: API tests not yet implemented ---"
+
+              echo ""
+              echo "=== Results: ${PASS} passed, ${FAIL} failed ==="
+
+              if [[ "$FAIL" -gt 0 ]]; then
+                echo "Some checks failed — dumping diagnostic info"
+                echo "--- IOP pods ---"
+                oc get pods -n insights-on-prem -o wide
+                echo "--- IOP deployment events ---"
+                oc describe deployment insights-on-prem -n insights-on-prem | tail -20
+                echo "--- Managed cluster status ---"
+                oc get managedcluster managed -o yaml 2>/dev/null || true
+                exit 1
+              fi
+
+  # ── Hold clusters on failure (opt-in via PipelineRun label) ──────────
+  # When any task fails, checks the PipelineRun for a
+  # "debug.iop/hold-on-failure=true" label. If set, prints cluster
+  # credentials and sleeps forever. Konfux kills the task when the
+  # ITS finally_timeout is reached. Cancel the PipelineRun manually
+  # when done debugging.
+  #
+  # The label is read at runtime from the PipelineRun metadata, so it
+  # can be added while the pipeline is running (before failure occurs).
+  # See ci/README.md for why labels are used instead of pipeline params.
+  #
+  # Requires ITS timeout annotations in konflux-release-data:
+  #   test.appstudio.openshift.io/pipeline_timeout: "4h"
+  #   test.appstudio.openshift.io/tasks_timeout: "2h"
+  #   test.appstudio.openshift.io/finally_timeout: "2h"
+  finally:
+    - name: hold-clusters-on-failure
+      when:
+        - input: "$(tasks.status)"
+          operator: in
+          values: ["Failed"]
+      params:
+        - name: PIPELINE_RUN_NAME
+          value: $(context.pipelineRun.name)
+        - name: PIPELINE_RUN_NAMESPACE
+          value: $(context.pipelineRun.namespace)
+        - name: hubClusterCredentialsSecretRef
+          value: $(tasks.provision-hub.results.secretRef)
+        - name: managedClusterCredentialsSecretRef
+          value: $(tasks.provision-managed.results.secretRef)
+      taskSpec:
+        params:
+          - name: PIPELINE_RUN_NAME
+          - name: PIPELINE_RUN_NAMESPACE
+          - name: hubClusterCredentialsSecretRef
+            type: string
+          - name: managedClusterCredentialsSecretRef
+            type: string
+        volumes:
+          - name: shared-data
+            emptyDir: {}
+          - name: hub-credentials
+            secret:
+              secretName: $(params.hubClusterCredentialsSecretRef)
+              optional: true
+          - name: managed-credentials
+            secret:
+              secretName: $(params.managedClusterCredentialsSecretRef)
+              optional: true
+        steps:
+          - name: check-hold-label
+            env:
+              - name: PIPELINE_RUN_NAME
+                value: "$(params.PIPELINE_RUN_NAME)"
+              - name: PIPELINE_RUN_NAMESPACE
+                value: "$(params.PIPELINE_RUN_NAMESPACE)"
+            volumeMounts:
+              - name: shared-data
+                mountPath: /shared
+            image: registry.redhat.io/openshift4/ose-cli:latest
+            script: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+              HOLD=$(oc get pipelinerun "${PIPELINE_RUN_NAME}" \
+                -n "${PIPELINE_RUN_NAMESPACE}" \
+                -o jsonpath='{.metadata.labels.debug\.iop/hold-on-failure}' 2>/dev/null || true)
+              echo -n "${HOLD}" > /shared/hold-on-failure
+              if [[ "${HOLD}" != "true" ]]; then
+                echo "Label debug.iop/hold-on-failure is not set — skipping credential dump."
+                echo "To hold clusters on failure, label the PipelineRun before it fails:"
+                echo "  oc label pipelinerun ${PIPELINE_RUN_NAME} -n ${PIPELINE_RUN_NAMESPACE} debug.iop/hold-on-failure=true"
+                exit 0
+              fi
+              echo "debug.iop/hold-on-failure=true — will dump credentials and hold."
+
+          - name: print-credentials-and-wait
+            volumeMounts:
+              - name: shared-data
+                mountPath: /shared
+              - name: hub-credentials
+                mountPath: /var/run/secrets/hub-cluster
+                readOnly: true
+              - name: managed-credentials
+                mountPath: /var/run/secrets/managed-cluster
+                readOnly: true
+            image: registry.redhat.io/openshift4/ose-cli:latest
+            script: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+
+              HOLD=$(cat /shared/hold-on-failure 2>/dev/null || true)
+              if [[ "${HOLD}" != "true" ]]; then
+                echo "Hold not requested — exiting."
+                exit 0
+              fi
+
+              echo "############################################################"
+              echo "# PIPELINE FAILED — cluster credentials for debugging      #"
+              echo "# Cancel this PipelineRun when you are done.               #"
+              echo "############################################################"
+
+              for CLUSTER_LABEL in HUB MANAGED; do
+                if [[ "${CLUSTER_LABEL}" == "HUB" ]]; then
+                  CRED_PATH="/var/run/secrets/hub-cluster"
+                else
+                  CRED_PATH="/var/run/secrets/managed-cluster"
+                fi
+
+                if [[ ! -f "${CRED_PATH}/kubeconfig" ]]; then
+                  echo "=== ${CLUSTER_LABEL} CLUSTER ==="
+                  echo "  (credentials not available — provisioning may have failed)"
+                  continue
+                fi
+
+                API_SERVER=$(KUBECONFIG="${CRED_PATH}/kubeconfig" oc config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || echo "unknown")
+                PASSWORD=$(cat "${CRED_PATH}/kubeAdminPassword" 2>/dev/null || echo "unknown")
+
+                echo ""
+                echo "=== ${CLUSTER_LABEL} CLUSTER ==="
+                echo "API Server:  ${API_SERVER}"
+                echo "Username:    kubeadmin"
+                echo "Password:    ${PASSWORD}"
+                echo ""
+                echo "Login command:"
+                echo "  oc login ${API_SERVER} -u kubeadmin -p ${PASSWORD} --insecure-skip-tls-verify"
+                echo ""
+                echo "Kubeconfig (base64 — decode and save to a file):"
+                base64 -w0 "${CRED_PATH}/kubeconfig"; echo
+              done
+
+              echo ""
+              echo "############################################################"
+              echo "# Sleeping to keep clusters alive. Cancel the PipelineRun  #"
+              echo "# when you are done debugging.                             #"
+              echo "############################################################"
+              sleep infinity
