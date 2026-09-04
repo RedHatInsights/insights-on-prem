@@ -386,6 +386,9 @@ spec:
           - name: hub-credentials
             secret:
               secretName: $(params.hubClusterCredentialsSecretRef)
+          - name: iop-pull-secret
+            secret:
+              secretName: imagerepository-for-insights-on-prem-image-pull
         steps:
           - name: deploy-iop
             env:
@@ -396,6 +399,9 @@ spec:
             volumeMounts:
               - name: hub-credentials
                 mountPath: /var/run/secrets/hub-cluster
+                readOnly: true
+              - name: iop-pull-secret
+                mountPath: /var/run/secrets/iop-pull-secret
                 readOnly: true
             image: registry.redhat.io/openshift4/ose-cli:latest
             script: |
@@ -418,16 +424,24 @@ spec:
               echo "Applying IOP deploy manifests..."
               oc apply -f deploy/
 
+              # The Konflux-built image lives in a private repo. The deploy
+              # manifests reference an imagePullSecret (ccxdev-insights-on-prem-
+              # pull-secret) that does not exist on ephemeral clusters. Create it
+              # from the Konflux image-pull secret mounted into this task so the
+              # deployment can pull its own image.
+              echo "Creating IOP image pull secret..."
+              oc create secret generic ccxdev-insights-on-prem-pull-secret \
+                -n insights-on-prem \
+                --type=kubernetes.io/dockerconfigjson \
+                --from-file=.dockerconfigjson=/var/run/secrets/iop-pull-secret/.dockerconfigjson \
+                --dry-run=client -o yaml | oc apply -f -
+              oc secrets link insights-on-prem ccxdev-insights-on-prem-pull-secret \
+                --for=pull -n insights-on-prem
+
               IOP_IMAGE=$(echo "${SNAPSHOT}" | jq -r '.components[] | select(.name == "insights-on-prem") | .containerImage')
               echo "Overriding IOP image: ${IOP_IMAGE}"
               oc set image deployment/insights-on-prem -n insights-on-prem \
                 "insights-on-prem=${IOP_IMAGE}"
-
-              # The default imagePullSecrets references a secret that doesn't exist
-              # on ephemeral clusters. The Konflux-built image is public.
-              oc patch deployment insights-on-prem -n insights-on-prem --type json \
-                -p '[{"op":"remove","path":"/spec/template/spec/imagePullSecrets"}]' \
-                2>/dev/null || true
 
               echo "Waiting for cert-manager operator..."
               ELAPSED=0
