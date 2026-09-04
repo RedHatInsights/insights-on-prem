@@ -198,6 +198,7 @@ async def upload_archive(
         ) from e
 
     except ProcessorBusyError as e:
+        logger.info(f"Request {request_id}: Archive processor is busy, retrying later")
         raise HTTPException(
             status_code=503,
             detail=str(e),
