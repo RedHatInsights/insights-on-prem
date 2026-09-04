@@ -7,7 +7,7 @@ service:
   postgres_user: insights
   postgres_password: insights
   max_file_size: 104857600  # 100MB in bytes
-  archive_queue_size: 10  # pending archives waiting for the processor thread
+  archive_queue_size: 0  # pending archives waiting for the processor thread
   temp_upload_dir: /tmp/insights-uploads
   extract_timeout_seconds: 300
   format: ccx_ocp_core.core.formats.json.OCPRecommendationsJsonFormat

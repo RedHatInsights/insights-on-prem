@@ -40,6 +40,8 @@ services:
       - ./migrations:/app/migrations:z
       - ./tests:/app/tests:z
       - ./config.yml:/app/config.yml:z
+      # Override the base-image insights-core with a local modified checkout.
+      - /home/jsegural/work/insights-core/insights:/opt/venv/lib64/python3.12/site-packages/insights:z
       - temp_uploads:/tmp/insights-uploads
     depends_on:
       postgres:
