@@ -38,7 +38,7 @@ Insights on Premise aims to provide recommendations based on Insights archives i
     - [API Documentation](#api-documentation)
   - [Running Locally with Docker Compose](#running-locally-with-docker-compose)
   - [Hermetic Builds](#hermetic-builds)
-    - [Regenerating requirements.txt / requirements-build.txt / rpms.in.yaml](#regenerating-requirementstxt--requirements-buildtxt--rpmsinyaml)
+    - [Regenerating requirements.txt / rpms.in.yaml](#regenerating-requirementstxt--rpmsinyaml)
   - [Building and Pushing Multiarch Image](#building-and-pushing-multiarch-image)
   - [License](#license)
 
@@ -438,27 +438,26 @@ For purposes of running the addon locally without need for the cluster, we maint
 
 ## Hermetic Builds
 
-The Dockerfile is built hermetically by Konflux (network access disabled during the build), using [Hermeto](https://hermetoproject.github.io/hermeto/) to prefetch pip and RPM dependencies beforehand. See `requirements-in.txt` (source for `pip-compile`), `requirements.txt`/`requirements-build.txt` (pinned lockfiles), and `rpms.in.yaml`/`rpms.lock.yaml` (RPM lockfile, regenerated via `scripts/update_rpm_lockfile.sh`).
+The Dockerfile is built hermetically by Konflux (network access disabled during the build), using [Hermeto](https://hermetoproject.github.io/hermeto/) to prefetch pip and RPM dependencies beforehand. See `requirements-in.txt` (source compiled by `uv`), `requirements.txt` (fully-pinned, hashed pip lockfile), and `rpms.in.yaml`/`rpms.lock.yaml` (RPM lockfile, regenerated via `scripts/update_rpm_lockfile.sh`).
 
-### Regenerating requirements.txt / requirements-build.txt / rpms.in.yaml
+### Regenerating requirements.txt / rpms.in.yaml
 
-To add or upgrade a Python dependency, edit `requirements-in.txt`, then regenerate the pinned files. **Always do this inside a `linux/amd64` Python 3.12 container** (matching the base image and Konflux's build platform) — running `pip-compile` on macOS/arm64 silently drops dependencies whose markers only match `x86_64`/`aarch64` (e.g. SQLAlchemy's `greenlet`), since pip-compile resolves environment markers against the machine it runs on, not the target platform:
+To add or upgrade a Python dependency, edit `requirements-in.txt`, then regenerate the pinned lockfile with [`uv`](https://docs.astral.sh/uv/). `uv` resolves for the *target* platform (`linux/x86_64`, manylinux/glibc, Python 3.12) regardless of the host, so this can run **directly on macOS/arm64 — no container needed** (unlike the old `pip-compile` workflow, which resolved environment markers against the host and silently dropped platform-only deps such as SQLAlchemy's `greenlet`):
 
 ```bash
-# Prefer the helper script (also used by ccx-rules-releaser):
-podman run --rm --platform linux/amd64 -v "$(pwd):/work:Z" -w /work python:3.12-slim \
-  bash scripts/update_requirements.sh
+# Prefer the helper script:
+bash scripts/update_requirements.sh
 
-# Equivalent manual commands:
-podman run --rm --platform linux/amd64 -v "$(pwd):/work:Z" -w /work python:3.12-slim bash -c '
-  set -euo pipefail
-  pip install -q pip-tools pybuild-deps
-  pip-compile --output-file=requirements.txt requirements-in.txt
-  pybuild-deps compile --generate-hashes --output-file=requirements-build.txt requirements.txt
-'
+# Equivalent manual command:
+uv pip compile requirements-in.txt --generate-hashes \
+  --python-version 3.12 --python-platform x86_64-manylinux_2_34 \
+  -o requirements.txt
 ```
 
-`requirements.txt` is the fully-pinned runtime lockfile; `requirements-build.txt` lists the build-backend sdists (e.g. `setuptools`, `cython`, `maturin`) Hermeto needs to prefetch so packages without prebuilt wheels can be built from source in the hermetic build.
+`requirements.txt` is the fully-pinned, hashed runtime lockfile. There is no
+`requirements-build.txt`: the Hermeto pip prefetch is configured to prefer binary wheels
+(the `binary` filter in `.tekton/*.yaml`), so dependencies are prefetched as wheels rather
+than built from source, and no build-backend lockfile is required.
 
 To regenerate `rpms.lock.yaml`, run the helper **inside a `linux/amd64` entitlement-capable RHEL9/UBI9 container** (`registry.access.redhat.com/ubi9/ubi`, which includes `subscription-manager` for entitled RHEL CDN repos). Do not run it on the host. Requires `RH_ORG_ID`, `RH_ACTIVATION_KEY`, and `scripts/.dockerconfig.json` (for registry.redhat.io):
 
