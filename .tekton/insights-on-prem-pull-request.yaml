@@ -38,7 +38,7 @@ spec:
   - name: prefetch-input
     value: >-
       [
-        {"type": "pip", "path": "."},
+        {"type": "pip", "path": ".", "binary": {"platform": "^(any|manylinux.*_x86_64|linux_x86_64)$"}},
         {"type": "rpm", "path": "."}
       ]
   pipelineRef:
