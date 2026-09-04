@@ -1,12 +1,13 @@
 #!/bin/bash
-# Regenerate requirements.txt and requirements-build.txt from requirements-in.txt.
+# Regenerate requirements.txt from requirements-in.txt using uv.
 #
-# Must run on linux/amd64 with Python 3.12 (matching the Dockerfile / Konflux
-# platform). On macOS/arm64, pip-compile silently drops packages whose markers
-# only match x86_64/aarch64 (e.g. greenlet). Prefer:
+# uv resolves for the *target* platform (linux/x86_64, manylinux/glibc, py3.12)
+# regardless of host, so this runs on macOS/arm64 directly — no linux/amd64
+# container needed (unlike the old pip-compile workflow).
 #
-#   podman run --rm --platform linux/amd64 -v "$(pwd):/work:Z" -w /work \
-#     python:3.12-slim bash scripts/update_requirements.sh
+# requirements-build.txt is intentionally NOT generated: the Hermeto pip prefetch
+# prefers binary wheels (see .tekton/*.yaml "binary" filter), so deps are fetched
+# as wheels rather than built from source.
 
 set -euo pipefail
 
@@ -14,21 +15,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "${REPO_ROOT}"
 
-if [ "$(uname -s)" != "Linux" ] || [ "$(uname -m)" != "x86_64" ]; then
-    echo "Error: must run on Linux x86_64 (got $(uname -s)/$(uname -m))." >&2
-    echo "Use: podman run --rm --platform linux/amd64 -v \"\$(pwd):/work:Z\" -w /work python:3.12-slim bash scripts/update_requirements.sh" >&2
+if ! command -v uv >/dev/null 2>&1; then
+    echo "uv not found; install it (e.g. 'brew install uv' or 'pip install uv')." >&2
     exit 1
 fi
 
-PY_VER="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
-if [ "${PY_VER}" != "3.12" ]; then
-    echo "Error: must run with Python 3.12 (got ${PY_VER})." >&2
-    echo "Use: podman run --rm --platform linux/amd64 -v \"\$(pwd):/work:Z\" -w /work python:3.12-slim bash scripts/update_requirements.sh" >&2
-    exit 1
-fi
+uv pip compile requirements-in.txt \
+    --generate-hashes \
+    --python-version 3.12 \
+    --python-platform x86_64-manylinux_2_34 \
+    --output-file requirements.txt
 
-python3 -m pip install -q 'pip-tools>=7.0.0,<7.6.1' pybuild-deps  # TODO: revert when https://github.com/hermetoproject/pybuild-deps/pull/415 is merged and published
-pip-compile --output-file=requirements.txt requirements-in.txt
-pybuild-deps compile --generate-hashes --output-file=requirements-build.txt requirements.txt
-
-echo "Updated requirements.txt and requirements-build.txt"
+echo "Updated requirements.txt"
